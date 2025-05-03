@@ -1,16 +1,17 @@
 # Standard libraries
 import requests
+import argparse
 import io
+import warnings
+from pandas.errors import ParserWarning
+
 from pathlib import Path
 from typing import List
 import time
 from tqdm import tqdm
 
-# Third-party libraries
 import pandas as pd
 import numpy as np
-
-from itertools import combinations
 
 class NISTRetriever:
     
@@ -51,225 +52,8 @@ class NISTRetriever:
             'Mc': 290.0, 'Lv': 293.0, 'Ts': 294.0, 'Og': 294.0
         }
 
-
-    def __url_build(self, limits, atoms, ionized):
-        
-        atom_comb = ""
-        for atom in atoms:
-            if ionized:
-                atom_comb += "%3B+" + atom
-            else:
-                atom_comb += "%3B+" + atom + "+I"
-                
-        atom_comb = atom_comb.replace("%3B+", '', 1)  # Remove unneeded %3B+ at the beginning
-        segway = "&limits_type=0&"
-        limits_comb = f"low_w={limits[0]}&upp_w={limits[1]}&"
-        
-        # Hardcoded variables
-        everything_else = "unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&conf_out=on&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data"
-        url = self._base_url + atom_comb + segway + limits_comb + everything_else
-        return url
-    
-
-    def __clean(self, df, wavelength_bounds, elements):
-        
-        # Check dataframe validity
-        core_cols = ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k', 'Acc', 'conf_i', 'term_i', 'conf_k', 'term_k']
-        wavelength_cols = ['obs_wl_vac(A)', 'obs_wl_air(A)']
-        missing_cores = [col for col in core_cols if col not in df.columns]
-        missing_wavelengths = [col for col in wavelength_cols if col not in df.columns]
-        
-        if len(df) == 0 or len(missing_cores) > 0 or len(missing_wavelengths) == 2:
-            raise ValueError(f"No data available for these parameters: atoms -> {elements}, wavelength bounds -> {wavelength_bounds}")
-        
-        # Bring all wavelength data under the same header
-        if "obs_wl_air(A)" in df.columns:
-            df = df.rename(columns={"obs_wl_air(A)": "obs_wl(A)"})
-        
-        if "obs_wl_vac(A)" in df.columns:
-            df = df.rename(columns={"obs_wl_vac(A)": "obs_wl(A)"})
-        
-        # Remove headers erroneously placed in the data
-        df = df[df["intens"] != "intens"]
-        df = df[df["obs_wl(A)"] != "obs_wl_air(A)"]
-        df = df[df["obs_wl(A)"] != "obs_wl_vac(A)"]
-        
-        # Adjust data type and content
-        df['J_k'] = df['J_k'].apply(np.nan_to_num)
-        
-        for col in ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k']:
-            df[col] = df[col].apply(self.float_func)
-            
-        df = df.astype({"obs_wl(A)": float, "fik": float, "term_k": str, "Acc": str, "unc_obs_wl":float, "Aki(s^-1)":float})
-        df['Acc'] = df['Acc'].apply(self.acc_swap)
-        
-        # Add columns for element and species number, if not already present
-        if 'element' not in df.columns:
-            df['element'] = elements[0]
-            df['sp_num'] = 1
-
-        return df
-    
-
-    def retrieve(self, wavelength_bounds: List[int], elements: List[str], ionized=False, save_file=None) -> pd.DataFrame:
-        
-        """
-        Function to retrieve data from NIST within the gfactor framework. 
-        
-        @param limits: lower and upper wavelength bounds, in Angstroms
-        @param elements: atomic species to be considered
-        @param ionized: Optional, indicates whether or not ionized transitions will be included - default is false
-        @param save_results: Optional, indicates whether or not the retrieved data will be save to an external file
-        @return: df: results from API request
-        
-        """
-        
-        # Construct URL
-        url = self.__url_build(wavelength_bounds, elements, ionized)
-        
-        # Retrieve data
-        response = requests.get(url)
-        df = pd.read_csv(io.StringIO(response.content.decode('utf-8')), delimiter="\t", index_col=False, dtype=str)
-        df = self.__clean(df, wavelength_bounds, elements)
-            
-        # Save to an external file
-        if save_file:
-            file_path = Path(save_file)
-            if not file_path.exists():
-                df.to_csv(save_file)
-        return df
-    
-
-    def extract(self, wavelength_bounds: List[int], elements: List[str], save_dir="./atomic_data", ionized=True, overwrite=False):
-
-        def find_subsets(input_list):
-            subsets = []
-            for r in range(1, len(input_list) + 1):
-                subsets.extend(combinations(input_list, r))
-            return subsets
-
-        # Core directory
-        dir = Path(save_dir)
-        dir.mkdir(parents=True, exist_ok=True)
-        element_combs = find_subsets(elements)
-
-        # Progress Bar
-        progress_bar = tqdm(total=len(element_combs), desc="Querying")
-
-        # Setup files for recording problem dates and queried dates
-        with open ("./gfactor/querying/problem_elements.txt", "w") as problem_file: 
-            problem_file.write("PROBLEM ELEMENTS\n\n")
-
-        for comb in element_combs:
-            comb = [*comb]
-            comb.sort(key = lambda x: self.elements_by_mass[x]) # Sort string
-            str_comb = ''.join(comb) # Make string query
-
-            # Ionized
-            if ionized:
-                cur_dir = dir / "ionized"
-                save_file = cur_dir / f"{str_comb}_{wavelength_bounds[0]}-{wavelength_bounds[1]}_ionized.csv"
-                if not save_file.exists() or overwrite:
-                    cur_dir.mkdir(parents=True, exist_ok=True)
-                    try:
-                        self.retrieve(wavelength_bounds=wavelength_bounds, elements=comb, ionized=True, save_file=save_file)
-                    except Exception as e:
-                        if isinstance(e, ValueError):
-                            with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                problem_file.write(f"\nRequests Error: elements={comb}, wavelength_lims={wavelength_bounds}, error = {e}\n\n, ionized=True") # Keep tabs on problematic dates
-                        elif isinstance(e, requests.exceptions.RequestException):
-                            time.sleep(10)
-                            try:
-                                self.retrieve(wavelength_bounds=wavelength_bounds, elements=comb, ionized=True, save_file=save_file)
-                            except requests.exceptions.RequestException as e:
-                                # Setup files for recording problem dates and queried dates
-                                with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                    problem_file.write(f"\nRequests Error: elements={comb}, wavelength_lims={wavelength_bounds}, error = {e}\n\n, ionized=True") # Keep tabs on problematic dates
-
-            # Standard
-            cur_dir = dir / "standard"
-            save_file = cur_dir / f"{str_comb}_{wavelength_bounds[0]}-{wavelength_bounds[1]}.csv"
-            if not save_file.exists() or overwrite:
-                cur_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    self.retrieve(wavelength_bounds=wavelength_bounds, elements=comb, ionized=False, save_file=save_file)
-                except Exception as e:
-                    if isinstance(e, ValueError):
-                        with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                            problem_file.write(f"\nRequests Error: elements={comb}, wavelength_lims={wavelength_bounds}, error = {e}\n\n") # Keep tabs on problematic dates
-                    elif isinstance(e, requests.exceptions.RequestException):
-                        time.sleep(10)
-                        try:
-                            self.retrieve(wavelength_bounds=wavelength_bounds, elements=comb, ionized=True, save_file=save_file)
-                        except requests.exceptions.RequestException as e:
-                            # Setup files for recording problem dates and queried dates
-                            with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                problem_file.write(f"\nRequests Error: elements={comb}, wavelength_lims={wavelength_bounds}, error = {e}\n\n") # Keep tabs on problematic dates
-
-            progress_bar.update(1)
-    
-
-    def extract_single(self, wavelength_bounds: List[int], elements: List[str], save_dir="./atomic_data", ionized=True, overwrite=False):
-
-        # Core directory
-        dir = Path(save_dir)
-        dir.mkdir(parents=True, exist_ok=True)
-
-        # Progress Bar
-        progress_bar = tqdm(total=len(elements), desc="Querying")
-
-        # Setup files for recording problem dates and queried dates
-        with open ("./gfactor/querying/problem_elements.txt", "w") as problem_file: 
-            problem_file.write("PROBLEM ELEMENTS\n\n")
-
-        for element in elements:
-
-            # Ionized
-            if ionized:
-                cur_dir = dir / "ionized"
-                save_file = cur_dir / f"{element}_{wavelength_bounds[0]}-{wavelength_bounds[1]}_ionized.csv"
-                if not save_file.exists() or overwrite:
-                    cur_dir.mkdir(parents=True, exist_ok=True)
-                    try:
-                        self.retrieve(wavelength_bounds=wavelength_bounds, elements=[element], ionized=True, save_file=save_file)
-                    except Exception as e:
-                        if isinstance(e, ValueError):
-                            with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                problem_file.write(f"\nRequests Error: elements={element}, wavelength_lims={wavelength_bounds}, error = {e}\n\n, ionized=True") # Keep tabs on problematic dates
-                        elif isinstance(e, requests.exceptions.RequestException):
-                            time.sleep(10)
-                            try:
-                                self.retrieve(wavelength_bounds=wavelength_bounds, elements=[element], ionized=True, save_file=save_file)
-                            except requests.exceptions.RequestException as e:
-                                # Setup files for recording problem dates and queried dates
-                                with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                    problem_file.write(f"\nRequests Error: elements={element}, wavelength_lims={wavelength_bounds}, error = {e}\n\n, ionized=True") # Keep tabs on problematic dates
-
-            # Standard
-            cur_dir = dir / "standard"
-            save_file = cur_dir / f"{element}_{wavelength_bounds[0]}-{wavelength_bounds[1]}.csv"
-            if not save_file.exists() or overwrite:
-                cur_dir.mkdir(parents=True, exist_ok=True)
-                try:
-                    self.retrieve(wavelength_bounds=wavelength_bounds, elements=[element], ionized=False, save_file=save_file)
-                except Exception as e:
-                    if isinstance(e, ValueError):
-                        with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                            problem_file.write(f"\nRequests Error: elements={element}, wavelength_lims={wavelength_bounds}, error = {e}\n\n") # Keep tabs on problematic dates
-                    elif isinstance(e, requests.exceptions.RequestException):
-                        time.sleep(10)
-                        try:
-                            self.retrieve(wavelength_bounds=wavelength_bounds, elements=[element], ionized=True, save_file=save_file)
-                        except requests.exceptions.RequestException as e:
-                            # Setup files for recording problem dates and queried dates
-                            with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                problem_file.write(f"\nRequests Error: elements={element}, wavelength_lims={wavelength_bounds}, error = {e}\n\n") # Keep tabs on problematic dates
-
-            progress_bar.update(1)
-
-            
     @staticmethod
-    def float_func(frac_str):
+    def __float_func(frac_str):
         
         """Removes the extraneous characters from "questionable" levels in a NIST generated Pandas dataframe
         for the relevant columns and converts half-integer momenta, e.g. 3/2, to decimals (1.5) for use in the g-factor
@@ -314,7 +98,7 @@ class NISTRetriever:
 
 
     @staticmethod
-    def acc_swap(val):
+    def __acc_swap(val):
         """Swaps the qualitative accuracies of the oscillator strengths from NIST data for the quantitative values,
         as a percentage of the oscillator strength. Note that for ratings of E the error is typically greater than 50%,
         so here we assign 70%.
@@ -353,12 +137,182 @@ class NISTRetriever:
         else:
             acc = val
         return acc
+    
 
+    def __url_build(self, atoms, ionized):
+        
+        atom_comb = ""
+        for atom in atoms:
+            if ionized:
+                atom_comb += "%3B+" + atom
+            else:
+                atom_comb += "%3B+" + atom + "+I"
+                
+        atom_comb = atom_comb.replace("%3B+", '', 1)  # Remove unneeded %3B+ at the beginning
+        segway = "&limits_type=0&"
+        
+        # Hardcoded variables
+        everything_else = "unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&conf_out=on&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data"
+        url = self._base_url + atom_comb + segway + everything_else
+        return url
+    
+
+    def __clean(self, df, elements):
+        
+        # Check dataframe validity
+        core_cols = ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k', 'Acc', 'conf_i', 'term_i', 'conf_k', 'term_k']
+        wavelength_cols = ['obs_wl_vac(A)', 'obs_wl_air(A)']
+        missing_cores = [col for col in core_cols if col not in df.columns]
+        missing_wavelengths = [col for col in wavelength_cols if col not in df.columns]
+        
+        if len(df) == 0 or len(missing_cores) > 0 or len(missing_wavelengths) == 2:
+            raise ValueError(f"No data available for these parameters: atoms -> {elements}")
+        
+        # Bring all wavelength data under the same header
+        if "obs_wl_air(A)" in df.columns:
+            df = df.rename(columns={"obs_wl_air(A)": "obs_wl(A)"})
+        
+        if "obs_wl_vac(A)" in df.columns:
+            df = df.rename(columns={"obs_wl_vac(A)": "obs_wl(A)"})
+        
+        # Remove headers erroneously placed in the data
+        df = df[df["intens"] != "intens"]
+        df = df[df["obs_wl(A)"] != "obs_wl_air(A)"]
+        df = df[df["obs_wl(A)"] != "obs_wl_vac(A)"]
+        
+        # Adjust data type and content
+        df['J_k'] = df['J_k'].apply(np.nan_to_num)
+        
+        for col in ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k']:
+            df[col] = df[col].apply(self.__float_func)
+            
+        df = df.astype({"obs_wl(A)": float, "fik": float, "term_k": str, "Acc": str, "unc_obs_wl":float, "Aki(s^-1)":float})
+        df['Acc'] = df['Acc'].apply(self.__acc_swap)
+        
+        # Add columns for element and species number, if not already present
+        if 'element' not in df.columns:
+            df['element'] = elements[0]
+            df['sp_num'] = 1
+
+        return df
+    
+
+    def retrieve(self, elements: List[str], ionized=False, save_dir=None, overwrite=False) -> pd.DataFrame:
+        
+        """
+        Function to retrieve data from NIST within the gfactor framework. 
+        
+        @param wavelength_bounds: lower and upper wavelength bounds, in Angstroms
+        @param elements: atomic species to be considered
+        @param ionized: Optional, indicates whether or not ionized transitions will be included
+        @save_dir: Optional, saves csv to this directory if provided
+        @param overwite: Optional, if saving results, forcibly overwrite existing files
+        @return: df: results from API request
+        
+        """
+
+        # Save to an external file
+        if save_dir:
+
+            # Make path
+            dir = Path(save_dir)
+            dir.mkdir(parents=True, exist_ok=True)
+            elements_str = " ".join(elements)
+
+            if ionized:
+                save_file = dir / f"{elements_str}_ionized.csv"
+            else:
+                save_file = dir / f"{elements_str}.csv"
+            
+            if not overwrite and save_file.exists():
+                return None # Data already exists
+
+        # Construct URL
+        url = self.__url_build(elements, ionized)
+
+        # Retrieve data
+        response = requests.get(url)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always", category=ParserWarning)
+            df = pd.read_csv(io.StringIO(response.content.decode('utf-8')), delimiter="\t", 
+                            index_col=False, dtype=str)
+            # Check if any warnings were captured
+            if len(w) != 0:
+                return None # Faulty dataframe
+            
+        # Clean, save, return data
+        df = self.__clean(df, elements)
+        df.to_csv(save_file)
+
+        return df
+    
+
+    def extract(self, save_dir, error_dir, overwrite):
+
+        # Core directory
+        dir = Path(save_dir)
+        dir.mkdir(parents=True, exist_ok=True)
+
+        # Subdirectories
+        ionized_dir = dir / "ionized"
+        standard_dir = dir / "standard"
+
+        # Elements List
+        elements = list(self.elements_by_mass.keys())
+        elements.sort(key = lambda x: self.elements_by_mass[x])
+
+        # Progress Bar
+        progress_bar = tqdm(total=len(elements), desc="Querying")
+
+        # Setup file for recording problem dates and queried dates
+        error_dir = Path(error_dir)
+        error_dir.mkdir(parents=True, exist_ok=True)
+        error_file = error_dir / "problem_elements.txt"
+        with open (error_file, "w") as problem_file: 
+            problem_file.write("PROBLEM ELEMENTS\n\n")
+
+        for element in elements:
+            for cur_dir, ionization in [(standard_dir, False), (ionized_dir, True)]:
+                try:
+                    self.retrieve(elements=[element], ionized=ionization, 
+                                  save_dir=cur_dir, overwrite=overwrite)
+                except Exception as e:
+                    if isinstance(e, ValueError):
+                        with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
+                            problem_file.write(f"\nRequests Error: elements={[element]}," \
+                                               f"ionization={ionization}, error = {e}\n\n") # Keep tabs on problematic dates
+                    elif isinstance(e, requests.exceptions.RequestException):
+                        time.sleep(5)
+                        try:
+                            self.retrieve(elements=[element], ionized=ionization, 
+                                          save_dir=cur_dir, overwrite=overwrite)
+                        except requests.exceptions.RequestException as e:
+                            with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
+                                problem_file.write(f"\nRequests Error: elements={[element]}," \
+                                               f"ionization={ionization}, error = {e}\n\n") # Keep tabs on problematic dates
+
+            progress_bar.update(1)
+
+
+def parse_args():
+        p = argparse.ArgumentParser("Extract Atomic Species Data from NIST Atomic Spectral Database")
+        p.add_argument("--save-dir", '-sd', type=str, default="./data/atomic",
+                    help="Save directory for elemental csv files")
+        p.add_argument("--error-dir", '-ed', type=str, default="./data/errors",
+                       help="Logs errors with specific queries, if any")
+        p.add_argument("--overwrite", "-o", type=bool, default=False,
+                       help="Forcibly ovewrite existing files if true")
+        
+        return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    retriever = NISTRetriever()
+    retriever.extract(save_dir=args.save_dir,
+                      error_dir = args.error_dir,
+                      overwrite=args.overwrite)
+      
 
 if __name__ == "__main__":
-
-    nist = NISTRetriever()
-    # elements = [element for element in list(nist.elements_by_mass.keys()) if nist.elements_by_mass[element] <= 56]
-    # nist.extract(wavelength_bounds=[800, 7000], elements=elements, save_dir="./atomic_data")
-    elements = list(nist.elements_by_mass.keys())
-    nist.extract_single(wavelength_bounds=[800, 7000], elements=elements, save_dir="./atomic_data")
+    main()

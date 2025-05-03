@@ -1,9 +1,12 @@
 from setuptools import setup, find_packages
 
 # List of requirements
-requirements = ['requests', 
-                'pandas', 
-                'scipy', 
+requirements = ['requests',
+                'tqdm', 
+                'pandas',
+                'matplotlib',
+                'scipy',
+                'specutils', 
                 'astropy', 
                 'lmfit',
                 'pytest']

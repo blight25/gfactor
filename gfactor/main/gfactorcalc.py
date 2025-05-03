@@ -7,9 +7,7 @@ from typing import List
 # Third-party libraries
 import pandas as pd
 import numpy as np
-from astropy.units import Quantity
 from astropy.units import cds
-from astropy.table import QTable
 from astropy import units as u
 
 # Local libraries

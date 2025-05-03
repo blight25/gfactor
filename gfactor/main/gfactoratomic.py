@@ -30,7 +30,7 @@ class AtomicData:
         self.retriever = NISTRetriever()
 
 
-    def load_nist(wavelength_bounds: List[int], elements: List[str], ionized=False):
+    def load_nist(elements: List[str], wavelength_bounds: List[int], ionized=False):
 
         elements.sort(key = lambda x: AtomicData.elements_by_mass[x]) # Sort list
         elements_str = ''.join(elements)

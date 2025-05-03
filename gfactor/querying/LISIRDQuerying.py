@@ -2,9 +2,10 @@
 # Standard libraries
 import requests
 import io
+import argparse
+
 from datetime import datetime as dt
 from datetime import date, timedelta
-from typing import List
 
 import pandas as pd
 from pathlib import Path
@@ -17,6 +18,7 @@ import time
 class LISIRDRetriever():
     
     """ Class for fetching data from LISIRD within the gfactor framework."""
+    
     def __url_build(self, ds):
         url = self.__base_url + ds + "." + "csv"
         return url
@@ -53,7 +55,6 @@ class LISIRDRetriever():
 
         return params
     
-
     def __query(self, ds: str, prjn = None, slctn = None, optn = None) -> pd.DataFrame:
         
         """
@@ -114,42 +115,51 @@ class LISIRDRetriever():
                         }
     
 
-    def retrieve(self, dataset:str, date=None, wavelength_bounds=None, max_queries=10) -> pd.DataFrame:
+    def dataset_names(self):
+        # Dataset Identification
+        names = {}
+        for key in list(self.datasets.keys()):
+            parts = key.split('_', 1)
+            if parts[0] in names: # Already seen, must have subsets ('low_res', 'high_res', etc.)
+                names[parts[0]].append(parts[1])
+            else:
+                if len(parts) == 2: # Has a subset
+                    names[parts[0]] = [parts[1]]
+                else:
+                    names[parts[0]] = [None] # No subset
+        
+        return names
+    
+
+    def retrieve(self, dataset:str, subset=None, date=None, max_queries=10) -> pd.DataFrame:
         
         """ Takes a dataset name to query, as well as optional date and wavelength specifications, and returns a pandas
         dataframe recording the irradiance and uncertainty at each wavelength and time.
         
         @param dataset: dataset to query, can be found in 'self.datasets'
         @param date: optional, date to query in 'YYYY-MM-DD' format
-        @param wavelength_bounds: optional, format is [lower_bound, upper_bound] in Angstroms. If only one bound is desired, set the 
-        other element to None
         @param max_queries: optional, integer to specify the maximum number of queries to make before raising an error
         
         @return df: results from API request
         """
         
-        # Create dictionary mapping all dataset names to their subsets
-        names = {}
-        for key in list(self.datasets.keys()):
-            parts = key.split('_', 1)
-            if parts[0] in names:
-                names[parts[0]].append(parts[1])
-            else:
-                if len(parts) == 2:
-                    names[parts[0]] = [parts[1]]
-                else:
-                    names[parts[0]] = [None]
-
-        # Generic dataset query
-        if dataset.upper() in names:
-            subset = names[dataset.upper()][-1] # Picks most recent subset available (eg. 'high_res' for NNL, '18' for GOES, etc.)
-            dataset = dataset.upper()
-            if subset:
-                dataset += '_' + subset
+        # Dataset Identification
+        names = self.dataset_names()
+        dataset = dataset.upper()
         
-        # Not in names - check for specific subset
-        elif dataset not in self.datasets:
-            raise ValueError(f"Dataset {dataset} not recognized: available datasets are: {list(names.keys())}")
+        if dataset not in names:
+            raise ValueError(f"Dataset {dataset} not recognized. Available datasets are: {list(names.keys())}")
+
+        subsets = names[dataset] # Any type of sub-designation for the dataset, e.g. [low_res, high_res]
+        if subset:
+            if not subsets[0]:
+                print(f"Dataset {dataset} has no subsets - retrieval still procedes at top level")
+                subset = None
+            elif subset not in subsets:
+                raise ValueError(f"subset {subset} not recognized for dataset {dataset}. Available subsets are {subsets}")
+        else:
+            subset = names[dataset][-1] # Pick most recent subset
+        dataset = dataset + "_" + subset if subset else dataset
         
         ds = self.datasets[dataset]["name"]
         
@@ -173,20 +183,6 @@ class LISIRDRetriever():
         if init_date < min_date or init_date > max_date:
             raise ValueError("Chosen date is out of bounds: must fall between " + min_date.strftime("%Y-%m-%d") +
                              " and " + max_date.strftime("%Y-%m-%d"))
-        
-        # Check if wavelength bounds were provided - otherwise, all wavelengths will be included
-        if wavelength_bounds is not None:
-            if wavelength_bounds[0] is not None:
-                wavelength_bounds[0] = wavelength_bounds[0] / 10 # Convert from Angstrom to nm
-                min_wave = str(wavelength_bounds[0])
-                slctn.append("wavelength>=" + min_wave)
-            if wavelength_bounds[1] is not None:
-                wavelength_bounds[1] = wavelength_bounds[1] / 10 # Convert from Angstrom to nm
-                max_wave = str(wavelength_bounds[1])
-                slctn.append("wavelength<=" + max_wave)
-            if wavelength_bounds[0] is not None and wavelength_bounds[1] is not None:
-                if wavelength_bounds[0] >= wavelength_bounds[1]:
-                    raise ValueError("Invalid wavelength bounds: lower bound must be less than upper bound")
         
         # Search variables
         cur_date = init_date
@@ -243,55 +239,60 @@ class LISIRDRetriever():
                     
             return df
     
-    
-    def extract(self, dataset="NNL", all_subsets=False, start_date:str=None, end_date:str=None, 
-                interval:int=1, save_dir="./spectra", overwrite=False):
 
+    def extract(self, dataset="NNL", subset=None, start_date:str=None, end_date:str=None, 
+                interval:int=1, save_dir="./data/spectra", log_dir="./data/spectra/log",
+                error_dir="./data/errors", overwrite=False):
+        
         # Dataset Identification
-        names = {}
-        for key in list(self.datasets.keys()):
-            parts = key.split('_', 1)
-            if parts[0] in names: # Already seen, must have subsets ('low_res', 'high_res', etc.)
-                names[parts[0]].append(parts[1])
+        names = self.dataset_names()
+        dataset = dataset.upper()
+        
+        if dataset not in names:
+            raise ValueError(f"Dataset {dataset} not recognized. Available datasets are: {list(names.keys())}")
+
+        subsets = names[dataset] # Any type of sub-designation for the dataset, e.g. [low_res, high_res]
+        if subset:
+            if not subsets[0]:
+                print(f"Dataset {dataset} has no subsets - querying will procede as usual")
+                subset = None
+            elif subset not in subsets:
+                raise ValueError(f"subset {subset} not recognized for dataset {dataset}. Available subsets are {subsets}")
             else:
-                if len(parts) == 2: # Has a subset
-                    names[parts[0]] = [parts[1]]
-                else:
-                    names[parts[0]] = [None] # No subset
-
-        default_subset = None
-        if dataset in self.datasets:
-            parts = dataset.split('_', 1)
-            if all_subsets:
-                raise ValueError(f"'{dataset}' is already a subset of {parts[0]}: please set 'all_subsets' to false to ensure expected behavior.")
-            dataset = parts[0]
-
-            if len(parts) == 2:
-                default_subset = parts[1]
+                print(f" ------------- Beginning query of {dataset}, subset: {subset} --------------")
         else:
-            dataset = dataset.upper()
-            if dataset not in names:
-                raise ValueError(f"Dataset {dataset} not recognized: available datasets are: {list(names.keys())}")
-
+            print(f" ------------- Beginning query of {dataset}, subsets: {names[dataset]} --------------")
+    
         # Create save directory
         save_dir = Path(save_dir + "/" + dataset)
         save_dir.mkdir(parents=True, exist_ok=True)
-        
+        print(f"Results to be saved in directory {save_dir}")
+
+        # Create log file
+        log_dir = Path(log_dir + "/" + dataset)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "query_date.txt"
+        print(f"Query log to be saved in directory {save_dir}")
+
+        # Create error file for recording problematic dates
+        error_dir = Path(error_dir + "/" + dataset)
+        error_dir.mkdir(parents=True, exist_ok=True)
+        error_file = error_dir / "problem_dates.txt"
+        with open (error_file, "w") as problem_file: 
+            problem_file.write("PROBLEM DATES\n\n")
+        print(f"Error log to be saved in directory {error_dir}")
+
+
         # Min and max dates - for subset extraction, will be bounded by strictest time window
         default_start_date = date(1000, 1, 1)
         default_end_date = date(3000, 1, 1)
-        if all_subsets:
-            for subset in names[dataset]:
-                full_name = dataset
-                if subset:
-                    full_name += '_' + subset
+        if not subset:
+            for sub in names[dataset]:
+                full_name = dataset + '_' + sub if sub else dataset
                 default_start_date = max(default_start_date, self.datasets[full_name]["min_date"])
                 default_end_date = min(default_end_date, self.datasets[full_name]["max_date"])
         else:
-            full_name = dataset
-            subset = default_subset if default_subset else names[dataset][-1]
-            if subset:
-                full_name += '_' + subset
+            full_name = dataset + '_' + subset
             default_start_date = max(default_start_date, self.datasets[full_name]["min_date"])
             default_end_date = min(default_end_date, self.datasets[full_name]["max_date"])
         
@@ -320,10 +321,6 @@ class LISIRDRetriever():
         progress_bar = tqdm(total=total_days, desc="Querying")
         progress_bar.update((start_date - default_start_date).days) # Indicate progress relative to min date
         
-        # Setup files for recording problem dates and queried dates
-        with open ("./gfactor/querying/problem_dates.txt", "w") as problem_file: 
-            problem_file.write("PROBLEM DATES\n\n")
-        
         # Loop
         while query_date <= end_date:
 
@@ -334,7 +331,7 @@ class LISIRDRetriever():
             if cur_dir.exists() and not overwrite:
                 
                 # Write current date to file
-                with open("./gfactor/querying/queried_dates.txt", "w") as query_file:
+                with open(log_file, "w") as query_file:
                     query_file.write(query_date.strftime('%Y-%m-%d'))
 
                 # Update progress bar
@@ -349,18 +346,12 @@ class LISIRDRetriever():
             # Query
             try:
                 data = {}
-                if all_subsets:
-                    for subset in names[dataset]:
-                        full_name = dataset
-                        if subset:
-                            full_name += '_' + subset
-                        data[subset] = self.retrieve(dataset=full_name, date=query_date.strftime("%Y-%m-%d"), max_queries=1)
+                if not subset:
+                    for sub in names[dataset]:
+                        data[sub] = self.retrieve(dataset=dataset, subset=sub, 
+                                                     date=query_date.strftime("%Y-%m-%d"), max_queries=1)
                 else:
-                    full_name = dataset
-                    subset = default_subset if default_subset else names[dataset][-1]
-                    if subset:
-                        full_name += '_' + subset
-                    data[subset] = self.retrieve(dataset=full_name, date=query_date.strftime("%Y-%m-%d"), max_queries=1)
+                    data[subset] = self.retrieve(dataset=dataset, subset=subset, date=query_date.strftime("%Y-%m-%d"), max_queries=1)
             
             except requests.exceptions.RequestException: # sometimes SSL behaves weird, or the connection gets closed suddenly/times out: try one more time
                 
@@ -369,50 +360,79 @@ class LISIRDRetriever():
                 # Query again
                 try:
                     data = {}
-                    if all_subsets:
-                        for subset in names[dataset]:
-                            full_name = dataset
-                            if subset:
-                                full_name += '_' + subset
-                            data[subset] = self.retrieve(dataset=full_name, date=query_date.strftime("%Y-%m-%d"), max_queries=1)
+                    if not subset:
+                        for sub in names[dataset]:
+                            data[sub] = self.retrieve(dataset=dataset, subset=sub, 
+                                                        date=query_date.strftime("%Y-%m-%d"), max_queries=1)
                     else:
-                        full_name = dataset
-                        subset = default_subset if default_subset else names[dataset][-1]
-                        if subset:
-                            full_name += '_' + subset
-                        data[subset] = self.retrieve(dataset=full_name, date=query_date.strftime("%Y-%m-%d"), max_queries=1)
+                        data[subset] = self.retrieve(dataset=dataset, subset=subset, date=query_date.strftime("%Y-%m-%d"), max_queries=1)
                 
-                except requests.exceptions.RequestException as e: # Back-to-back failures probably isn't a coincidence
-                    with open ("./gfactor/querying/problem_dates.txt", "a") as problem_file:
+                except requests.exceptions.RequestException as e: # Back-to-back failures isn't a coincidence
+                    with open (error_file, "a") as problem_file:
                         problem_file.write(f"Requests Error: {query_date}, {e}\n\n") # Keep tabs on problematic dates
                     query_date += timedelta(interval)
                     progress_bar.update(1)
                     continue
             
             except ValueError: # There was no data available, or else something (that isn't an SSL or connection issue) didn't go right
-                with open ("./gfactor/querying/problem_dates.txt", "a") as problem_file:
+                with open (error_file, "a") as problem_file:
                     problem_file.write(f"Value Error: {query_date}\n\n") # Keep tabs on problematic dates
                 query_date += timedelta(interval)
                 progress_bar.update(1)
                 continue
             
             # Save dataframes
-            for subset in list(data.keys()):
-                filename = subset if subset else dataset
-                pd.to_pickle(data[subset], cur_dir / f"{filename}.pickle")
+            for sub in list(data.keys()):
+                filename = dataset + "_" + sub if sub else dataset
+                pd.to_pickle(data[sub], cur_dir / f"{filename}.pickle")
             
             # Write current date to file
-            with open("./gfactor/querying/queried_dates.txt", "w") as query_file:
+            with open(log_file, "w") as query_file:
                 query_file.write(query_date.strftime('%Y-%m-%d'))
         
             # Update progress bar
             query_date += timedelta(interval)
             progress_bar.update(1)
+    
+ 
+def parse_args():
+        p = argparse.ArgumentParser("Extract spectral data from LISIRD")
+        p.add_argument("--dataset", '-ds', type=str, default="nnl",
+                       help="LISIRD dataset to query from")
+        p.add_argument("--subset", '-sub', type=str, default=None,
+                       help="Queries every subset (e.g. high-res and low-res) for a given dataset")
+        p.add_argument("--interval", "-i", type=int, default=1,
+                       help="Queries every ith date from min to max")
+        p.add_argument("--start-date", '-start', type=str, default=None,
+                       help="Start date for querying, in 'YYYY-MM-DD' format")
+        p.add_argument("--end-date", "-end", type=str, default=None,
+                       help="End date for querying, in 'YYYY-MM-DD' format")
+        p.add_argument("--save-dir", '-save', type=str, default="./data/spectra",
+                    help="Save directory for spectral pickle files")
+        p.add_argument("--log-dir", '-log', type=str, default="./data/spectra/log_files",
+                       help="Log file for keeping track of the current query date")
+        p.add_argument("--error-dir", '-error', type=str, default="./data/errors",
+                    help="Logs errors with specific queries, if any")
+        p.add_argument("--overwrite", "-o", type=bool, default=False,
+                    help="Forcibly ovewrite existing files if true")
+        
+        return p.parse_args()
 
+
+def main():
+    args = parse_args()
+    retriever = LISIRDRetriever()
+    retriever.extract(dataset=args.dataset,
+                      subset=args.subset,
+                      start_date=args.start_date,
+                      end_date=args.end_date,
+                      interval=args.interval,
+                      save_dir=args.save_dir,
+                      log_dir=args.log_dir,
+                      error_dir=args.error_dir,
+                      overwrite=args.overwrite)
 
 
 if __name__ == "__main__":
-    retriever = LISIRDRetriever()
-    data = retriever.retrieve("nnl", "2015-05-22")
-    print(data)
+    main()
     

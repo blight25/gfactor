@@ -108,7 +108,7 @@ class SolarSpectrum(Spectrum1D):
 
     @staticmethod
     def daily_spectrum(date:str, dataset:str="NNL", res:str="high", 
-                       daily_dir:str="./spectra", emissions:Dict[str, List[float]]=None):
+                       daily_dir:str="./dadta/spectra", emissions:Dict[str, List[float]]=None):
         
         if dataset not in SolarSpectrum.daily_spectra:
             raise ValueError(f"{dataset} not a supported daily spectrum: "
@@ -124,9 +124,11 @@ class SolarSpectrum(Spectrum1D):
         
         # Fetch from LISIRD
         except FileNotFoundError:
-            data = SolarSpectrum.daily_retriever.retrieve(dataset=f"{dataset}_{res}_res", 
-                                                                 date=date, 
-                                                                 max_queries=1)
+            subset = res + "_res"
+            data = SolarSpectrum.daily_retriever.retrieve(dataset=dataset,
+                                                          subset=subset,
+                                                          date=date, 
+                                                          max_queries=1)
         
         # Unit Conversion
         wavelengths = data["wavelength (nm)"] * 10

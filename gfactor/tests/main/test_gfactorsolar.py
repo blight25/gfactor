@@ -1,9 +1,6 @@
 import pytest
-import datetime as dt
-import random
-import matplotlib
-matplotlib.use('Agg')
-
+from datetime import datetime as dt
+from datetime import date, timedelta
 from astropy import units as u
 from astropy.units import Quantity
 from astropy.nddata import VarianceUncertainty, InverseVariance
