@@ -206,10 +206,10 @@ class gfactor:
 
         # 3. Stitch everything together into a single spectrum
         sumer_sumer_scaled = SolarSpectrum.stitch(spec_left=sumer, spec_right=sumer_scaled,
-                                                  priority="right", coverage=.01, max_residual=0)
+                                                  priority="right", coverage=.01, max_res_percentile=0)
         
         spectrum = SolarSpectrum.stitch(spec_left=sumer_sumer_scaled, spec_right=low_res_daily,
-                                        priority="left", coverage=.01, max_residual=0)
+                                        priority="left", coverage=.01, max_res_percentile=0)
         
         
         # **************************************** G-FACTOR CALCULATION ********************************************

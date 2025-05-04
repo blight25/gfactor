@@ -403,71 +403,166 @@ class SolarSpectrum(Spectrum1D):
 
     @staticmethod
     def stitch(spec_left:'SolarSpectrum', spec_right: 'SolarSpectrum', priority="left",
-               coverage=.10, max_residual=.05, return_stitch_points=False):
+               coverage=.10, max_res_percentile=.05, return_stitch_points=False):
         
+        """Stitches two solar spectra together in their region of overlap. 
+        The location at which this occurs is dictated by the 'priority' and 
+        two hyperparameters: 'coverage', and 'max_res_percentile', both bounded from 0 to 1.
+        
+        @param spec_left: 
+            spectrum that 'runs left', or more precisely, has the
+            smaller left-side wavelength bound.
+
+        @param spec_right: 
+            spectrum that 'runs right', or has the larger right-side
+            wavelength bound.
+
+        @param priority : 
+            indicates which spectrum to preserve as long as possible. for
+            instance, if spec_left is judged to be of better quality (higher resolution, 
+            lower uncertainty, etc.) than spec_right, then we should set priority = 'left' to
+            avoid cutting it off prematurely (especially if the overlapping region is large).
+            Additionally, when identifying the overlapping region, the spectrum with LOWER priority is interpolated
+            on the axis of the spectrum with HIGHER priority - i.e., only the lower priority spectrum
+            is approximated.
+        
+        @param coverage (0 <= c <= 1): 
+            if priority = left, filters out the first (1 - coverage)*100% of wavelengths. 
+                For instance, priority = left and coverage = .9 -> ignore first 90% of overlap.
+                Conceptually, as coverage grows, the later we try to stitch (potentially at the cost of a smooth
+                transition)
+            if priority = right, filters out the last (1 - coverage)*100% of wavelengths
+                For instance, priority = right and coverage = .9 -> ignore final 90% of overlap.
+                In this case, as coverage grows, the earlier we try to stitch (with the same potential drawback)
+        
+        @param max_res_percentile (0 <= mr <= 1): 
+            same behavior for priority = 'left' or 'right'. Given an array of residuals 
+            (in the region allowed by 'coverage'), applies an additional filter, such that any
+            wavelengths with a residual > max_res_percentile*100% is removed. 
+            For instance, if max_res_percentile = .10, then we would like to only consider wavelengths
+            where the flux residuals (between left and right spectrum) are below the 10th percentile. 
+            Conceptually, as max_res_percentile shrinks, the stricter our margin for error becomes (but
+            we may be forced to stitch earlier/later than might otherwise be preferred)
+        
+        @param return_stitch_points: 
+            optional: returns the final candidates after filtering by coverage and residual, if set to 
+            True.
+        
+        @return stitched_spectrum: 
+            single SolarSpectrum object of combined spectra
+        
+        @return stitch_waves:
+            final candidate stitch wavelengths (only if return_stitch_points = True)
+
+        """
+        
+        # Check flux unit compatability
         if spec_left.flux.unit != spec_right.flux.unit:
             raise ValueError(f"Left spectra's flux units of '{spec_left.flux.unit}' "
                              f"are incompatible with right spectra's "
                              f"flux units '{spec_right.flux.unit}'")
 
+        # Check wavelength unit compatability
         if spec_left.spectral_axis.unit != spec_right.spectral_axis.unit:
             raise ValueError(f"Left spectra's wavelength units of '{spec_left.spectral_axis.unit}' "
                              f" are incompatible with right spectra's "
                              f" wavelength units '{spec_right.spectral_axis.unit}'")
 
+        # Check hyperparameter values
         if not 0 <= coverage <= 1:
             raise ValueError("'coverage' must be a float between 0 and 1")
     
-        if not 0 <= max_residual <= 1:
+        if not 0 <= max_res_percentile <= 1:
             raise ValueError("'max_residual' must be a float between 0 and 1")
 
-
+        # Preserve spec_left
         if priority == "left":
-            wave_idxs = np.array(list(range(len(spec_left.spectral_axis))))
-            overlap_idxs = wave_idxs[spec_left.spectral_axis >= spec_right.spectral_axis[0]]
 
-            coverage_idxs = overlap_idxs[overlap_idxs - overlap_idxs[0] / (len(overlap_idxs) - 1) >= (1 - coverage)]
+            # Array of indices
+            wave_idxs = np.array(list(range(len(spec_left.spectral_axis))))
+
+            # Overlap mask: retain only the region of overlap
+            overlap_mask = spec_left.spectral_axis >= spec_right.spectral_axis[0]
+            overlap_idxs = wave_idxs[overlap_mask]
+
+            # Coverage mask: filters out the first (1 - coverage)*100% of the overlapping data
+            coverage_mask = (overlap_idxs - overlap_idxs[0] / (len(overlap_idxs) - 1)) >= (1 - coverage)
+            coverage_idxs = overlap_idxs[coverage_mask]
+
+            # Filter left spectrum down to the 'coverage' region
             spec_left_waves = spec_left.spectral_axis[coverage_idxs]
             spec_left_flux = spec_left.flux[coverage_idxs]
 
+            # Interpolate right spectrum in the 'coverage' region 
             spec_right_flux = np.interp(spec_left_waves, spec_right.spectral_axis, spec_right.flux)
+
+            # Flux residuals in 'coverage' region
             flux_diffs = np.absolute(spec_right_flux - spec_left_flux)
-            diff_percentile = np.percentile(flux_diffs, max_residual*100)
+
+            # Obtains the max_residual*100% percentile of the residuals
+            diff_percentile = np.percentile(flux_diffs, max_res_percentile*100)
+
+            # Filter out all candidate wavelengths with residuals greater than diff_percentile
             stitch_waves = spec_left_waves[flux_diffs < diff_percentile]
+
+            # Take the last candidate available (if max_residual = 0, just take left spectrum's upper wavelength bound)
             stitch_wave = stitch_waves[-1] if len(stitch_waves) > 0 else spec_left_waves[-1]
 
+            # Stitch wavelengths and flux at the candidate wavelength
             combined_waves = np.concatenate((spec_left.spectral_axis[spec_left.spectral_axis <= stitch_wave], 
                                             spec_right.spectral_axis[spec_right.spectral_axis > stitch_wave]))
-            combined_flux = np.concatenate((spec_left.flux[spec_left.spectral_axis <= stitch_wave], spec_right.flux[spec_right.spectral_axis > stitch_wave]))
+            combined_flux = np.concatenate((spec_left.flux[spec_left.spectral_axis <= stitch_wave], 
+                                            spec_right.flux[spec_right.spectral_axis > stitch_wave]))
             
+            # Stitch uncertainty, if provided
             if spec_left.uncertainty and spec_right.uncertainty:
                 combined_uncertainty = np.concatenate(spec_left.uncertainty[spec_left.spectral_axis <= stitch_wave], spec_right.uncertainty[spec_right.spectral_axis > stitch_wave])
             else:
-                combined_uncertainty = None
+                combined_uncertainty = np.concatenate(spec_left.uncertainty[spec_left.spectral_axis <= stitch_wave], np.array([None]*len(spec_right.spectral_axis) - 1))
 
+
+        # Preserve spec_right
         else:
-            wave_idxs = np.array(list(range(len(spec_right.spectral_axis))))
-            overlap_idxs = wave_idxs[spec_right.spectral_axis <= spec_left.spectral_axis[-1]]
-            
-            coverage_idxs = overlap_idxs[(overlap_idxs - overlap_idxs[0]) / (len(overlap_idxs) - 1) <= coverage]
 
+            # Array of indices
+            wave_idxs = np.array(list(range(len(spec_right.spectral_axis))))
+
+            # Overlap mask: retain only the region of overlap
+            overlap_mask = spec_right.spectral_axis <= spec_left.spectral_axis[-1]
+            overlap_idxs = wave_idxs[overlap_mask]
+
+            # Coverage mask: filters out the last (1 - coverage)*100% of the overlapping data
+            coverage_mask = (overlap_idxs - overlap_idxs[0]) / (len(overlap_idxs) - 1) <= coverage
+            coverage_idxs = overlap_idxs[coverage_mask]
+
+            # Filter right spectrum down to the 'coverage' region
             spec_right_waves = spec_right.spectral_axis[coverage_idxs]
             spec_right_flux = spec_right.flux[coverage_idxs]
 
+            # Interpolate left spectrum in the 'coverage' region 
             spec_left_flux = np.interp(spec_right_waves, spec_left.spectral_axis, spec_left.flux)
+
+            # Flux residuals in 'coverage' region
             flux_diffs = np.absolute(spec_left_flux - spec_right_flux)
-            diff_percentile = np.percentile(flux_diffs, max_residual*100)
+
+            # Obtains the max_residual*100% percentile of the residuals
+            diff_percentile = np.percentile(flux_diffs, max_res_percentile*100)
+
+            # Filter out all candidate wavelengths with residuals greater than diff_percentile
             stitch_waves = spec_right_waves[flux_diffs < diff_percentile]
 
+            # Take the first candidate available (if max_residual = 0, just take right spectrum's lower wavelength bound)
             stitch_wave = stitch_waves[0] if len(stitch_waves) > 0 else spec_right_waves[0]
 
+            # Stitch wavelengths and flux at the candidate wavelength
             combined_waves = np.concatenate((spec_left.spectral_axis[spec_left.spectral_axis < stitch_wave], spec_right.spectral_axis[spec_right.spectral_axis >= stitch_wave]))
             combined_flux = np.concatenate((spec_left.flux[spec_left.spectral_axis < stitch_wave], spec_right.flux[spec_right.spectral_axis >= stitch_wave]))
             
+            # Stitch uncertainty, if provided
             if spec_left.uncertainty and spec_right.uncertainty:
                 combined_uncertainty = np.concatenate((spec_left.uncertainty[spec_left.spectral_axis < stitch_wave], spec_right.uncertainty[spec_right.spectral_axis >= stitch_wave]))
             else:
-                combined_uncertainty = None
+                combined_uncertainty = np.concatenate(np.array([None]*len(spec_left.spectral_axis) - 1), spec_right.uncertainty[spec_right.spectral_axis >= stitch_wave])
         
         # Combine and carry over emission values, if any
         emissions = {}
@@ -477,8 +572,7 @@ class SolarSpectrum(Spectrum1D):
             emissions[key] = value['Wavelengths']
         emissions = emissions if len(emissions) != 0 else None
 
-
-        # Stitched
+        # Wrap with SolarSpectrum
         stitched_spectrum = SolarSpectrum(flux=combined_flux, spectral_axis=combined_waves, 
                                           uncertainty=combined_uncertainty, emissions=emissions)
         
@@ -493,15 +587,34 @@ class SolarSpectrum(Spectrum1D):
     @staticmethod
     def spectral_overlap(spec1, spec2:'SolarSpectrum'):
 
+        """ Finds the overlapping region of two solar spectra and returns trimmed versions
+        of each spectra over it (but on their own respective axes). No assumptions are made
+        about spectrum location by way of the order of arguments - the left and right spectra
+        are identified automatically. 
+
+        @param spec1: 
+            SolarSpectrum object
+
+        @param spec2: 
+            Also a SolarSpectrum object - units between spec1 and spec2 should
+            be compatible
+        
+        @return spec1_overlap - SolarSpectrum of spec1, bounded by the region of overlap
+
+        @return spec2_overlap = SolarSpectrum of spec2, bounded by the region of overlap      
+        """
+
+        # Check flux unit compatability
         if spec1.flux.unit != spec2.flux.unit:
             raise ValueError(f"Left spectra's Flux units of '{spec1.flux.unit}' " 
                              f" are incompatible with right spectra's flux units '{spec2.flux.unit}'")
-
+        
+        # Check wavelength unit compatability
         if spec1.spectral_axis.unit != spec2.spectral_axis.unit:
             raise ValueError(f"Left spectra's wavelength units of '{spec1.spectral_axis.unit}' "
                              f" are incompatible with right spectra's wavelength units '{spec2.spectral_axis.unit}'")
 
-
+        # Masks for trimming
         trim1 = [np.ones_like(spec1.spectral_axis.value).astype(bool)]*2
         trim2 = [np.ones_like(spec2.spectral_axis.value).astype(bool)]*2
 
@@ -517,9 +630,15 @@ class SolarSpectrum(Spectrum1D):
         else:
             trim2[1] = (spec2.spectral_axis <= spec1.spectral_axis[-1])
         
+        # Apply appropriate masking to spec1
         waves1_overlap = spec1.spectral_axis[(trim1[0]) & (trim1[1])]
         flux1_overlap = spec1.flux[(trim1[0]) & (trim1[1])]
 
+        # Applay appropriate masking to spec2
+        waves2_overlap = spec2.spectral_axis[(trim2[0]) & (trim2[1])]
+        flux2_overlap = spec2.flux[(trim2[0]) & (trim2[1])]
+
+        # Carry over emissions
         emissions = {}
         for key, value in list(spec1.emissions.items()):
             emissions[key] = value['Wavelengths']
@@ -528,10 +647,8 @@ class SolarSpectrum(Spectrum1D):
         
         emissions = emissions if len(emissions) != 0 else None
 
+        # Trimmed spectra
         spec1_overlap = SolarSpectrum(flux=flux1_overlap, spectral_axis=waves1_overlap, emissions=emissions)
-
-        waves2_overlap = spec2.spectral_axis[(trim2[0]) & (trim2[1])]
-        flux2_overlap = spec2.flux[(trim2[0]) & (trim2[1])]
         spec2_overlap = SolarSpectrum(flux=flux2_overlap, spectral_axis=waves2_overlap, emissions=emissions)
 
         return spec1_overlap, spec2_overlap
@@ -539,14 +656,38 @@ class SolarSpectrum(Spectrum1D):
 
     def integrated_flux(self, bounds:List[float]=None, return_res=False):
 
+        """Calculates the integrated flux for the spectrum over a specified emission feature. 
+        Units on the bounds aren't necessary, they can be inferred from the SolarSpectrum object.
+
+        @param bounds: 
+            wavelength bounds, in the form [lower bound, upper bound]. If bounds are set to None, 
+            returns the integrated flux of the whole spectrum
+
+        @param return_res: 
+            returns the resolution over the feature, if set to True
+
+        @return integrated_flux
+        @return res (if return_res = True)
+         
+        """
+        
+        # Specific feature
         if bounds is not None:
+
+            # Convert units
             if not isinstance(bounds, Quantity):
                 bounds = bounds * self.spectral_axis.unit
+
+            # Check feature bound validity
             if bounds[0] < self.spectral_axis[0] or bounds[-1] > self.spectral_axis[-1]:
                 raise ValueError("feature bounds must fall within range of spectral axis")
+            
+            # Wavelengths, flux, resolution over emission feature
             waves = self.spectral_axis[(self.spectral_axis >= bounds[0]) & (self.spectral_axis <= bounds[1])]
             flux = self.flux[(self.spectral_axis >= bounds[0]) & (self.spectral_axis <= bounds[1])]
             res = (waves[-1] - waves[0]) / len(waves)
+        
+        # Whole spectrum
         else:
             flux = self.flux
             res = (self.spectral_axis[-1] - self.spectral_axis[0]) / len(self.spectral_axis)
@@ -562,32 +703,70 @@ class SolarSpectrum(Spectrum1D):
 
 
     def _gaussian_func(params, feature_waves, feature_flux):
+
+        """ Gaussian fit function for feature fitting with the lmfit package """
     
         vals = params.valuesdict()
         model = vals['height']*np.exp(-.5*np.square((feature_waves.value - vals['mean']) / vals['std']))
         return model - feature_flux.value
 
 
-    def feature_fit(self, feature:List[float], fit_func=_gaussian_func, height=1, mean=0, std=1):
+    def feature_fit(self, feature:List[float], height=1, mean=0, std=1):
+
+        """Fit a Gaussian to a given emission feature, using the given fitting function and initial
+        parameter guesses. Units on the feature bounds aren't necessary, they can be inferred 
+        from the SolarSpectrum object.
+
+        @param feature: 
+            wavelength bounds, of the form [lower bound, upper bound]
+
+        @param height: 
+            initial guess for the height of the Gaussian
+
+        @param mean: 
+            initial guess for the center of the Gaussian
+
+        @param std: 
+            initial guesss for the spread of the Gaussian
+
+        @return height: 
+            fitted height
+
+        @return mean: 
+            fitted mean
+
+        @return std: 
+            fitted std
+
+        @return pixel_std: 
+            for constructing Gaussian kernels using Gaussian1DKernel, 
+            need spread in pixels, not wavelength
+        """
         
+        # Set up lmfit parameters
         params = Parameters()
         params.add("height", value=height, min=0)
         params.add("mean", value=mean, min=0)
         params.add("std", value=std, min=0)
-
+        
+        # Convert to spectral axis units
         if not isinstance(feature, Quantity):
             feature = feature*self.spectral_axis.unit
 
+        # spectrum wavelengths and flux on the feature
         feature_waves = self.spectral_axis[(self.spectral_axis >= feature[0]) & (self.spectral_axis <= feature[-1])]
         feature_flux = self.flux[(self.spectral_axis >= feature[0]) & (self.spectral_axis <= feature[-1])]
-        fit_results = minimize(fit_func, params, args=(feature_waves, feature_flux))
+
+        # Fitting procedure
+        fit_results = minimize(self._gaussian_func, params, args=(feature_waves, feature_flux))
         
-        # Params
+        # Fitted params
         height, mean, std = list(fit_results.params.valuesdict().values())
         height = height * self.flux.unit
         mean = mean * self.spectral_axis.unit
         std = std * self.spectral_axis.unit
-
+        
+        # Spectrum resolution over feature
         res = (feature_waves[-1] - feature_waves[0]) / len(feature_waves)
         pixel_std = std / res # Resolution in pixel space
         
@@ -598,52 +777,115 @@ class SolarSpectrum(Spectrum1D):
 
 
     def _poly_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress=False):
-        
-        vals = params.valuesdict()
 
+        """Polynomial fit function for spectrum fitting (SUMER to daily spectra) using lmfit """
+        
+        # Coefficients
+        coeffs = params.valuesdict()
+
+        # f(x) = c0 + c1*x + c2*x**2 + ..., where x = SUMER.spectral_axis
         transformation = np.zeros_like(sumer.spectral_axis.value)
-        for i, val in enumerate(list(vals.values())):
+        for i, val in enumerate(list(coeffs.values())):
             transformation += val * sumer.spectral_axis.value**(len(params) - i - 1)
         
+        # Scaled SUMER, g(x) = f(x) * SUMER.flux
         output_flux = transformation * sumer.flux
+
+        # Wrap with SolarSpectrum
         output = SolarSpectrum(flux=output_flux, spectral_axis=sumer.spectral_axis)
         
+        # Downsample onto daily spectrum wavelengths
         downsampled_output = SolarSpectrum.resample(spec=output, new_axis=daily_spec.spectral_axis)
+
+        # Gaussian Convolution on downsampled spectra
         dc_output = SolarSpectrum.convolution(downsampled_output, std=gaussian_std.value)
         
+        # Training
         if regress:
             return (dc_output.flux - daily_spec.flux).value
+        
+        # Evaluation
         else:
             return output, downsampled_output, dc_output
 
 
     def _legendre_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress=False):
+
+        """Legendre fit function for spectrum fitting (SUMER to daily spectra) using lmfit"""
         
+        # Constructs Legendre polynomial of degree n
         def leg_n(x, n):
             leg = legendre(n)
             P_n = leg(x)
             return P_n
         
-        vals = params.valuesdict()
+        # Coefficients
+        coeffs = params.valuesdict()
         
+        # f(x) = c0 + c1*x + c2*x**2 + ..., where x = SUMER.spectral_axis
         transformation = np.zeros_like(sumer.spectral_axis.value)
-        for i, val in enumerate(list(vals.values())):
+        for i, val in enumerate(list(coeffs.values())):
             transformation += val * leg_n(sumer.spectral_axis.value, i)
-            
+
+        # Scaled SUMER, g(x) = f(x) * SUMER.flux   
         output_flux = transformation * sumer.flux
+
+        # Wrap with SolarSpectrum
         output = SolarSpectrum(flux=output_flux, spectral_axis=sumer.spectral_axis)
         
+        # Downsample onto daily spectrum wavelengths
         downsampled_output = SolarSpectrum.resample(spec=output, new_axis=daily_spec.spectral_axis)
+
+        # Gaussian Convolution on downsampled spectra
         dc_output = SolarSpectrum.convolution(downsampled_output, std=gaussian_std.value)
         
+        # Training
         if regress:
             return (dc_output.flux - daily_spec.flux).value
+        
+        # Evaluation
         else:
             return output, downsampled_output, dc_output
 
 
 
-    def daily_fit(poly_degree, sumer, daily_spec, gaussian_std, fit="polynomial"):
+    def daily_fit(sumer, daily_spec, gaussian_std, poly_degree=6, fit="polynomial"):
+
+        """Finds a polynomial scaling transformation which fits SUMER to a daily spectrum.
+        
+        @param sumer:
+            SUMER SolarSpectrum object
+
+        @param daily_spec:
+            daily (NNL, SORCE, TIMED) daily spectrum
+
+        @param gaussian std:
+            standard deviation (in pixel space) for Gaussian convolution - identify a feature 
+            on the daily spectrum and run 'feature_fit' first, to obtain a reliable estimate.
+        
+        @param poly_degree:
+            degree of the transformation
+        
+        @param fit:
+            if fit = polynomial, uses standard polynomial fit function
+            Otherwise, uses a legendre polynomial fit function
+        
+        @return output: 
+            SolarSpectrum object, SUMER scaled to match daily spectrum
+        
+        @return downsampled_output:
+            SolarSpectrum object, SUMER scaled + downsampling
+        
+        @return dc_output:
+            SolarSpectrum object, SUMER scaled + downsampling + convolution 
+            (This is what is directly compared to the daily spectrum for training
+            and visualization)
+        
+        @return fitted_params:
+            fit coefficients for the polynomial transformation, f(x), which is applied
+            to SUMER as g(x) = f(x)*SUMER.flux
+        
+        """
 
         # Ensure that only region of overlap is considered
         overlap_tolerance = 1 * daily_spec.spectral_axis.unit
@@ -652,22 +894,24 @@ class SolarSpectrum(Spectrum1D):
         if runs_left or runs_right: 
             sumer, daily_spec = SolarSpectrum.spectral_overlap(sumer, daily_spec)
         
-        # Ensure units are consistent
+        # Check flux unit compatibility
         if sumer.flux.unit != daily_spec.flux.unit:
             raise ValueError(f"Inconsistent units: SUMER flux with units '{sumer.flux.unit}' is incompatible with " \
                              f"daily flux units of '{daily_spec.flux.unit}")
         
+        # Check wavelength unit compatibility
         if gaussian_std.unit != u.dimensionless_unscaled:
             raise ValueError("Standard deviation for constructing gaussian kernel must be dimensionless, but " \
                              f"std was given with units of {gaussian_std.unit}:\nyou may need to divide by the " \
                              "spectral resolution first.")
 
-        # Create parameters
+        # Create lmfit parameters
         alphabet = list(string.ascii_lowercase)
         params = Parameters()
         for i in range(poly_degree):
             params.add(alphabet[i], value=1)
 
+        # Fit function to use
         if fit == "polynomial":
             fit_func = SolarSpectrum._poly_func
         else:
@@ -696,7 +940,7 @@ class SolarSpectrum(Spectrum1D):
             downsampled_output.emissions = emissions
             dc_output.emissions = emissions
         
-        return output, downsampled_output, dc_output, fit_results
+        return output, downsampled_output, dc_output, fitted_params
 
 
 if __name__ == "__main__":
