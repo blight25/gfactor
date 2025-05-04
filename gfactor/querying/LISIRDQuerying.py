@@ -108,7 +108,8 @@ class LISIRDRetriever():
         self.__base_url = "https://lasp.colorado.edu/lisird/latis/dap/"
 
         self.datasets = {"TIMED": {"name": "timed_see_ssi_l3", "min_date": date(2002, 2, 8), "max_date": date(2023, 8, 30)},
-                        "SORCE": {"name": "sorce_ssi_l3", "min_date": date(2003, 2, 25), "max_date": date(2020, 2, 25)},
+                        "SORCE_low_res": {"name": "sorce_ssi_l3", "min_date": date(2003, 2, 25), "max_date": date(2020, 2, 25)},
+                        "SORCE_high_res": {"name": "sorce_solstice_ssi_high_res", "min_date": date(2003, 3, 5), "max_date": date(2020, 2, 25)},
                         "GOES_18": {"name": "noaa_goes18_euvs_1d", "min_date": date(2022, 9, 9), "max_date": date(2025, 1, 27)},
                         "NNL_low_res": {"name": "nnl_ssi_P1D", "min_date": date(1874, 5, 9), "max_date": date(2023, 12, 31)},
                         "NNL_high_res": {"name": "nnl_hires_ssi_P1D", "min_date": date(1874, 5, 9), "max_date": date(2023, 12, 31)}

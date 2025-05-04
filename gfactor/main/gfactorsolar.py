@@ -25,12 +25,20 @@ from typing import List, Dict, Tuple
 class SolarSpectrum(Spectrum1D):
     
     daily_retriever = LISIRDRetriever()
-    daily_spectra = ["NNL", "NRL"]
+    daily_spectra = ["TIMED", "SORCE", "NNL"]
     resampler = FluxConservingResampler()
 
 
-    def __init__(self, emissions:Dict[str, List[float]]=None, *args, **kwargs):
+    def __init__(self, name=None, emissions:Dict[str, List[float]]=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
+        self._name = name # Useful for distinguishing between SolarSpectrum objects
+
+        # Global resolution - slight variation from this value over smaller windows is expected
+        self.global_res = (self.spectral_axis[-1] - self.spectral_axis[0]) / len(self.spectral_axis)  
+
+        # Maps feature names (e.g. Lyman-Alpha, CI 1335, etc.) to wavelength bounds, 
+        # integrated fluxes, and local resolution
         self._emissions = {}
         if emissions:
             for emission in list(emissions.keys()):
@@ -48,7 +56,15 @@ class SolarSpectrum(Spectrum1D):
         # Rename non-static methods
         self.resample = self._resample
         self.convolution = self._convolution
-    
+
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, new_name):
+        self._name = new_name
     
     @property
     def emissions(self):
@@ -56,12 +72,38 @@ class SolarSpectrum(Spectrum1D):
     
     @emissions.setter
     def emissions(self, new_emissions:Dict[str, List[float]]):
+
+        """
+        Initializes or overwrites existing emission features - please refer to 'add_emissions' if 
+        you wish to add more while preserving any existing features. 
+
+        Takes a dictionary of the form 
+        emissions = {emission_name: [lower wavelength bound:upper wavelength bound]}.
+
+        SolarSpectrum objects then calculate a local resolution (res) and integrated flux (i_flux)
+        for each emission feature.
+
+        Results are stored as a nested dictionary of the form 
+        {emission_name: 
+        {
+        "Wavelengths": [lower wavelength bound, upper wavelength bound], 
+        "Resolution": res, 
+        "Integrated Flux": i_flux}
+        }"""
+
         for emission in list(new_emissions.keys()):
                 bounds = new_emissions[emission]
                 if not isinstance(bounds, Quantity):
-                    bounds = bounds*self.spectral_axis.unit
-                if bounds[0] < self.spectral_axis[0] or bounds[-1] > self.spectral_axis[-1]:
-                    continue
+                    bounds = bounds*self.spectral_axis.unit # Convert units
+                
+                # Catch invalid boundary conditions
+                if bounds[0] < self.spectral_axis[0]:
+                    raise ValueError(f"bound {bounds[0]} for feature {emission} falls below "
+                                      f"spectral axis minimum of {self.spectral_axis[0]}")
+                elif bounds[-1] > self.spectral_axis[-1]:
+                    raise ValueError(f"bounds {bounds} for feature {emission} ")
+                
+                # Create emission dict
                 self._emissions[emission] = {}
                 self._emissions[emission]["Wavelengths"] = bounds
                 integrated_flux, res = self.integrated_flux(bounds, return_res=True)
@@ -69,14 +111,38 @@ class SolarSpectrum(Spectrum1D):
                 self._emissions[emission]["Resolution"] = res
     
 
-    def add_emissions(self, emissions:Dict[str, List[float]]):
+    def add_emissions(self, new_emissions:Dict[str, List[float]]):
 
-        for emission in list(emissions.keys()):
-                bounds = emissions[emission]
+        """
+        Extends current emission features to include new emissions - preserves existing emissions.
+
+        Takes a dictionary of the form 
+        emissions = {emission_name: [lower wavelength bound:upper wavelength bound]}.
+
+        SolarSpectrum objects then calculate a local resolution (res) and integrated flux (i_flux)
+        for each emission feature.
+
+        Results are stored as a nested dictionary of the form 
+        {emission_name: 
+        {
+        "Wavelengths": [lower wavelength bound, upper wavelength bound], 
+        "Resolution": res, 
+        "Integrated Flux": i_flux}
+        }"""
+
+        for emission in list(new_emissions.keys()):
+                bounds = new_emissions[emission]
                 if not isinstance(bounds, Quantity):
-                    bounds = bounds*self.spectral_axis.unit
-                if bounds[0] < self.spectral_axis[0] or bounds[-1] > self.spectral_axis[-1]:
-                    continue
+                    bounds = bounds*self.spectral_axis.unit # Convert units
+                
+                # Catch invalid boundary conditions
+                if bounds[0] < self.spectral_axis[0]:
+                    raise ValueError(f"bound {bounds[0]} for feature {emission} falls below "
+                                      f"spectral axis minimum of {self.spectral_axis[0]}")
+                elif bounds[-1] > self.spectral_axis[-1]:
+                    raise ValueError(f"bounds {bounds} for feature {emission} ")
+
+                # Create emission dict
                 self._emissions[emission] = {}
                 self._emissions[emission]["Wavelengths"] = bounds
                 integrated_flux, res = self.integrated_flux(bounds, return_res=True)
@@ -85,7 +151,21 @@ class SolarSpectrum(Spectrum1D):
 
 
     @staticmethod
-    def sumer_spectrum(sumer_file:str="./spectra/SUMER/SUMER.txt", emissions:Dict[str, List[float]]=None):
+    def sumer_spectrum(sumer_file:str="./SUMER/SUMER.txt", emissions:Dict[str, List[float]]=None):
+
+        """ Loads the SUMER spectrum and returns it as a Solar Spectrum object. SUMER is compiled from the
+        BASS 2000 solar archive (https://bass2000.obspm.fr/solar_spect.php), and represents our 
+        best high-resolution capture of solar activity between ~670 and ~1609 Angstroms. Unfortunately,
+        BASS 2000 is not queryable, so there is no failsafe if this file is not identifiable.
+        
+        @param sumer_file: exact filepath for accessing SUMER
+        
+        @param emissions: optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
+
+        @return spectrum: SUMER spectrum as a SolarSpectrum object
+         """
+
+        # Read in SUMER file
         sumer = pd.read_csv(sumer_file)
     
         # Convert to numpy arrays
@@ -107,56 +187,120 @@ class SolarSpectrum(Spectrum1D):
     
 
     @staticmethod
-    def daily_spectrum(date:str, dataset:str="NNL", res:str="high", 
-                       daily_dir:str="./dadta/spectra", emissions:Dict[str, List[float]]=None):
+    def daily_spectrum(date:str, dataset:str="NNL",
+                       emissions:Dict[str, List[float]]=None,
+                       daily_dir:str="./data/spectra"):
         
+        """ Loads in SolarSpectrum object(s) specified by a given dataset and date. Currently 
+        available datasets are as follows (see descriptions from UC Boulder's 
+        LISIRD: https://lasp.colorado.edu/lisird/):
+
+        1. {NNL: {high-res: https://lasp.colorado.edu/lisird/data/nnl_ssi_P1D}
+                 {low-res: https://lasp.colorado.edu/lisird/data/nnl_hires_ssi_P1D} }
+
+        2. {SORCE: {high-res: https://lasp.colorado.edu/lisird/data/sorce_solstice_ssi_high_res}
+                   {low-res: https://lasp.colorado.edu/lisird/data/sorce_ssi_l3} }       
+                 
+        3. {TIMED: https://lasp.colorado.edu/lisird/data/timed_see_ssi_l3}
+
+        
+        For spectra with both high and low resolution designations, both versions will be loaded
+        and returned as tuple of SolarSpectrum objects (high-res, low-res): can always
+        check '.name' attribute to confirm which is which. Note that the chosen date may not always 
+        be valid for both subsets - in this case, the unavailable subset will be set to None.
+        
+        Otherwise, the first tuple value will be a SolarSpectrum, and the second will be None.
+
+        @param dataset: string dataset name - can be lower or uppercase
+        
+        @param emissions: optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
+        
+        @param daily_dir: specifies where to search for existing solar files. If no match is found, data
+        will be queried from LISIRD directly (this may take a few seconds).
+
+        @return specs = (spec_1, spec_2): high-resolution and low-resolution Solar Spectrum objects (subject to the caveats
+        listed above).
+
+        """
+        dataset = dataset.upper()
         if dataset not in SolarSpectrum.daily_spectra:
             raise ValueError(f"{dataset} not a supported daily spectrum: "
                              f"Currently supported spectra (queried from LISIRD " 
                              f"Database @ https://lasp.colorado.edu/lisird/) "
                              f"are {SolarSpectrum.daily_spectra}.")
         
+        # Path object
         daily_dir = Path(daily_dir + "/" + dataset)
-        
-        # Fetch from internal files
-        try:
-            data = pd.read_pickle(daily_dir/date/(res + "_res.pickle"))
-        
-        # Fetch from LISIRD
-        except FileNotFoundError:
-            subset = res + "_res"
-            data = SolarSpectrum.daily_retriever.retrieve(dataset=dataset,
+
+        # Dataset subsets
+        subsets = SolarSpectrum.daily_retriever.dataset_names() # Get subsets
+        specs = []
+        for subset in subsets[dataset]:
+
+            file = daily_dir / date / subset + ".pickle" # Filename
+
+            # Read internally
+            if file.exists():
+                data = pd.read_pickle(file)
+            # Query 
+            else:
+                data = SolarSpectrum.daily_retriever.retrieve(dataset=dataset,
                                                           subset=subset,
                                                           date=date, 
                                                           max_queries=1)
         
-        # Unit Conversion
-        wavelengths = data["wavelength (nm)"] * 10
-        flux = data["irradiance (W/m^2/nm)"] / 10
-        spectrum = SolarSpectrum(flux=Quantity(flux, unit=u.W / u.m**2 /u.AA), 
-                                   spectral_axis=Quantity(wavelengths, unit=u.AA),
-                                   emissions=emissions)
+            # Unit Conversion
+            wavelengths = data["wavelength (nm)"] * 10
+            flux = data["irradiance (W/m^2/nm)"] / 10
 
-        return spectrum
+            # Spectrum object
+            name = dataset + "_" + subset if subset else dataset
+            spectrum = SolarSpectrum(flux=Quantity(flux, unit=u.W / u.m**2 /u.AA), 
+                                    spectral_axis=Quantity(wavelengths, unit=u.AA),
+                                    emissions=emissions,
+                                    name=name)
+            specs.append(spectrum)
+
+        return tuple(specs)
 
 
     @staticmethod
     def resample(spec:'SolarSpectrum', new_axis:Quantity):
+
+        """Resample the flux from a given spectrum's solar axis onto a
+         new axis, using astropy's FluxConservingResampler. See 
+         https://specutils.readthedocs.io/en/stable/api/specutils.manipulation.FluxConservingResampler.html
+         for more details.
+         
+         @param spec: SolarSpectrum object
+         @param new_axis: Quantity object, new axis for resampling. Note
+         that the new axis unit must match the units of spec.spectral_axis.
+         
+         @return resampled_spectra: a new SolarSpectrum object, with
+         spectral_axis = new_axis
+         """
         
+        # Check unit compatibility
         if spec.spectral_axis.unit != new_axis.unit:
             raise ValueError(f"Wavelength units of '{new_axis.unit}'  "
                              f" are incompatible with spectrum wavelength units "
                              f"'{spec.spectral_axis.unit}'")
         
+        # Resampled spectra - but it's a Spectrum1D object
         resampled_spectra = SolarSpectrum.resampler(spec, new_axis)
 
+        # If emissions exist, need to adjust values
         if len(spec.emissions) != 0:
             emission_keys = list(spec.emissions.keys())
             emission_dicts = list(spec.emissions.values())
             emission_bounds = [emission_dict["Wavelengths"] for emission_dict in emission_dicts]
+            
+            # SolarSpectrum object
             resampled_spectra = SolarSpectrum(flux=resampled_spectra.flux, 
                                 spectral_axis=resampled_spectra.spectral_axis, 
                                 emissions=dict(zip(emission_keys, emission_bounds)))
+        
+        # Otherwise, immediately wrap with SolarSpectrum
         else:
             resampled_spectra = SolarSpectrum(flux=resampled_spectra.flux, 
                                 spectral_axis=resampled_spectra.spectral_axis)
@@ -166,6 +310,18 @@ class SolarSpectrum(Spectrum1D):
     
     def _resample(self, new_axis):
 
+        """Resamples self.flux in-place from self.spectral_axis onto a
+         new axis, using astropy's FluxConservingResampler. See 
+         https://specutils.readthedocs.io/en/stable/api/specutils.manipulation.FluxConservingResampler.html
+         for more details.
+         
+         @param spec: SolarSpectrum object
+         @param new_axis: Quantity object, new axis for resampling. Note
+         that the new axis unit must match the units of spec.spectral_axis.
+        
+         """
+        
+        # Check unit compatability
         if self.spectral_axis.unit != new_axis.unit:
             raise ValueError(f"Wavelength units of '{new_axis.unit}' "
                              f" are incompatible with current wavelength units " 
@@ -173,28 +329,43 @@ class SolarSpectrum(Spectrum1D):
 
         resampled_spectra = SolarSpectrum.resampler(self, new_axis)
 
+        # If emissions exist, need to adjust values
         if len(self._emissions) != 0:
             emission_keys = list(self._emissions.keys())
             emission_dicts = list(self._emissions.values())
             emission_bounds = [emission_dict["Wavelengths"] for emission_dict in emission_dicts]
+
+            # SolarSpectrum object
             resampled_spectra = SolarSpectrum(flux=resampled_spectra.flux, 
                                 spectral_axis=resampled_spectra.spectral_axis, 
                                 emissions=dict(zip(emission_keys, emission_bounds)))
+            
+        # Otherwise, immediately wrap with SolarSpectrum
         else:
             resampled_spectra = SolarSpectrum(flux=resampled_spectra.flux, 
                                 spectral_axis=resampled_spectra.spectral_axis)
         
-        # Update object itself
+        # In-place update
         self.__dict__.update(resampled_spectra.__dict__)
         
     
     @staticmethod
     def convolution(spec:'SolarSpectrum', std=1):
+
+        """Performs a Gaussian convolution on the given spectrum's flux
+         and returns it on the same spectral axis as a new SolarSpectrum object.
+        
+         @param spec: spectrum to be convolved
+         @param std: standard deviation for the Gaussian kernel
+
+         @return convolved_spectra: SolarSpectrum with convolved flux
+          """
         
         kernel = Gaussian1DKernel(stddev=std)
         convolved_flux = convolve(spec.flux, kernel=kernel)
         convolved_spectra = SolarSpectrum(flux=convolved_flux, spectral_axis=spec.spectral_axis)
 
+        # If emissions exist, need to carry over values
         if len(spec.emissions) != 0:
             emission_keys = list(spec.emissions.keys())
             emission_dicts = list(spec.emissions.values())
@@ -206,11 +377,19 @@ class SolarSpectrum(Spectrum1D):
     
     
     def _convolution(self, std=1):
-        
+
+        """Performs a Gaussian convolution in-place on self.flux.
+    
+        @param spec: spectrum to be convolved
+        @param std: standard deviation for the Gaussian kernel
+
+        """
+    
         kernel = Gaussian1DKernel(stddev=std)
         convolved_flux = convolve(self.flux, kernel=kernel)
         convolved_spectra = SolarSpectrum(flux=convolved_flux, spectral_axis=self.spectral_axis)
 
+        # If emissions exist, need to carry over values
         if len(self._emissions) != 0:
             emission_keys = list(self._emissions.keys())
             emission_dicts = list(self._emissions.values())
@@ -218,9 +397,9 @@ class SolarSpectrum(Spectrum1D):
             emissions = dict(zip(emission_keys, emission_bounds))
             convolved_spectra.emissions = emissions
         
+        # In-place update
         self.__dict__.update(convolved_spectra.__dict__)
         
-
 
     @staticmethod
     def stitch(spec_left:'SolarSpectrum', spec_right: 'SolarSpectrum', priority="left",
@@ -290,21 +469,23 @@ class SolarSpectrum(Spectrum1D):
             else:
                 combined_uncertainty = None
         
-        # Update emissions
+        # Combine and carry over emission values, if any
         emissions = {}
         for key, value in list(spec_left.emissions.items()):
             emissions[key] = value['Wavelengths']
         for key, value in list(spec_right.emissions.items()):
             emissions[key] = value['Wavelengths']
-        
         emissions = emissions if len(emissions) != 0 else None
-            
-        # Update spectrum
+
+
+        # Stitched
         stitched_spectrum = SolarSpectrum(flux=combined_flux, spectral_axis=combined_waves, 
                                           uncertainty=combined_uncertainty, emissions=emissions)
         
+        # Returns all candidate stitch points, if requested
         if return_stitch_points:
             return stitched_spectrum, stitch_waves
+        # Returns spectrum by itself
         else:
             return stitched_spectrum
        
