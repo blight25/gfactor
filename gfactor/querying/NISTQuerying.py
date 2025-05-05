@@ -16,8 +16,7 @@ import numpy as np
 class NISTRetriever:
     
     """
-    Custom class for retrieving data from the NIST Atomic Database. Note that, while not in the imports list,
-    openpyxl is necessary for saving to excel files.
+    Custom class for retrieving data from the NIST Atomic Database. 
     Sample link: https://physics.nist.gov/cgi-bin/ASD/lines1.pl?spectra=H+I%3B+C+I%3B+O+I%3B+S+I&limits_type=0&low_w=800&upp_w=6000&unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data
     Non-ionized: https://physics.nist.gov/cgi-bin/ASD/lines1.pl?spectra=H%3B+C%3B+O%3B+S&limits_type=0&low_w=800&upp_w=6000&unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data
     With Conf: "unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&conf_out=on&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data"
@@ -202,12 +201,20 @@ class NISTRetriever:
         """
         Function to retrieve data from NIST within the gfactor framework. 
         
-        @param wavelength_bounds: lower and upper wavelength bounds, in Angstroms
-        @param elements: atomic species to be considered
-        @param ionized: Optional, indicates whether or not ionized transitions will be included
-        @save_dir: Optional, saves csv to this directory if provided
-        @param overwite: Optional, if saving results, forcibly overwrite existing files
-        @return: df: results from API request
+        @param elements: 
+            atomic species to be considered
+
+        @param ionized: 
+            Optional, indicates whether or not ionized transitions will be included
+
+        @param save_dir: 
+            Optional, saves csv to this directory if provided
+
+        @param overwite: 
+            Optional, if saving results, forcibly overwrite existing files
+
+        @return: df: 
+            results from API request
         
         """
 

@@ -58,10 +58,18 @@ class gfactor:
     def __extract_state_data(nist_table, row_idx, line):
         
         """Extracts atomic data from NIST Dataframe for the current emission line and state.
-        @param nist_table: NIST Pandas Dataframe
-        @param row: contains values for the current state
-        @param line: current wavelength
-        @return constants_array: contains momentum, energy, and other values for the current state
+
+        @param nist_table:
+            Atomic data from NIST
+
+        @param row_idx: 
+            row to index from nist_table
+
+        @param line: 
+            emission wavelength
+
+        @return constants: 
+            dictionary of atomic transition data
         """
 
         row = nist_table[row_idx]
@@ -99,11 +107,15 @@ class gfactor:
         
         """Calculates Boltzmann factors for all possible rotational energy states and determines the
         associated probability of the current state.
-        @param constants_array: contains momentum and energy values for each state, as well as element and species
-        identification
-        @param row: contains values for the current state
-        @param T: temperature in Kelvin
-        @return prob: current state probability
+
+        @param constants: 
+            dictionary containing atomic transition data
+
+        @param T: 
+            temperature in Kelvin
+
+        @return prob: 
+            current state probability
         """
 
         states = (2 * constants['J_i_other'] + 1) * np.exp(constants['Ei_other'] / (gfactor.k * T))
@@ -114,16 +126,24 @@ class gfactor:
         return prob
     
 
-    def __get_gfactors(self, nist_table, spectrum, T, hel_v, hel_d):
+    def __get_gfactors(self, nist_table:pd.DataFrame, spectrum:SolarSpectrum, T:float, hel_v:float, hel_d:float):
         
-        """Calculates the g-factor for a given atomic species and wavelength.
-        @param nist_table: NIST Pandas Dataframe
-        @param row: contains values for the current state
-        @param line: current wavelength
-        @param T: temperature in Kelvin
-        @param hel_v: heliocentric velocity in cm/s
-        @param hel_d: heliocentric distance in AU
-        @param solar_interpolation: interpolation of the solar spectrum
+        """Calculates gfactors for the given atomic transition data, solar spectrum, 
+        temperature, and heliocentric conditions."
+
+        @param nist_table: 
+            Atomic Data from NIST
+        @param spectrum:
+            SolarSpectrum object
+
+        @param T: 
+            temperature in Kelvin
+
+        @param hel_v: 
+            heliocentric velocity in cm/s
+
+        @param hel_d: 
+            heliocentric distance in AU
         """
 
         for i in range(len(nist_table['obs_wl(A)'])):
@@ -135,6 +155,7 @@ class gfactor:
             if line > spectrum.spectral_axis[-1]:
                 raise ValueError('no comparable solar data for this bandpass: ' + str(nist_table['obs_wl(A)'].iloc[i]))   
 
+            # Constants and transition probabilities
             constants = self.__extract_state_data(nist_table, i, line)
             prob = self.__get_state_prob(constants, T)
 
@@ -160,18 +181,30 @@ class gfactor:
             self._g_factors.append(gf)
             
 
-    def gfactor_calc(self, elements: List[str], wavelength_bounds=[800, 6000], date="2019-12-19", T=300, hel_d=1, hel_v=5) -> pd.DataFrame:
+    def gfactors(self, elements: List[str], wavelength_bounds=[800, 6000], date="2019-12-19", T=300, hel_d=1, hel_v=5) -> pd.DataFrame:
         
         """Calculates gfactors for a given set of atomic species and helocentric conditions.
         
-        @param elements: list of elements to analyze, e.g. [H, Na, S, ...]
-        @param wavelength_bounds: list of length 2 specifying the lower and upper wavelength bounds, respectively
-        @param date: a specific day to fetch data for, given in the form "YYYY-MM-DD"
-        @param T: temperature in Kelvin
-        @param hel_d: heliocentric distance (distance from comet to the sun, in AU)
-        @param hel_v: heliocentric velocity (velocity relative to the sun, in AU/s)
+        @param elements: 
+            list of elements to analyze, e.g. [H, Na, S, ...]
+
+        @param wavelength_bounds: 
+            bounds of the form [lower bound, upper bound] - expected in units of Angstrom
+
+        @param date: 
+            date of observation, given in the form "YYYY-MM-DD"
+
+        @param T: 
+            temperature in Kelvin
+
+        @param hel_d: 
+            heliocentric distance (distance from comet to the sun, in AU)
+
+        @param hel_v: 
+            heliocentric velocity (velocity relative to the sun, in km/s)
         
-        @return gf_dataframe: pandas dataframe containing elements, wavelengths, and their associated gfactors
+        @return gf_dataframe: 
+            pandas dataframe containing elements, wavelengths, and associated gfactors
         
         """
         
@@ -181,15 +214,12 @@ class gfactor:
         nist_table = AtomicData.load_nist(wavelength_bounds=wavelength_bounds, elements=elements)
 
         # 2. Fetch daily spectrum data
-        high_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL", res="high")
-        low_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL", res="low")
+        high_res_daily, low_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL")
 
         # 4. Load SUMER data
         sumer = SolarSpectrum.sumer_spectrum()
         
-
         # ************************************** SPECTRUM CONSTRUCTION ********************************************
-        
         
         # 1. Build convolution kernel (1305 OI line basis)
         height, mean, std, pixel_std = high_res_daily.feature_fit(fit_func=SolarSpectrum._gaussian_func, 
@@ -235,5 +265,5 @@ class gfactor:
 if __name__ == "__main__":
     
     x = gfactor()
-    gf_dataframe = x.gfactor_calc(elements=['H', 'O'], date="2018-11-16", wavelength_bounds=(800, 6000), T=300, hel_d=1.0, hel_v=-62.7) 
+    gf_dataframe = x.gfactors(elements=['H', 'O'], date="2018-11-16", wavelength_bounds=(800, 6000), T=300, hel_d=1.0, hel_v=-62.7) 
     print("test")

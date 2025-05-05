@@ -8,7 +8,7 @@ from specutils import Spectrum1D
 
 from gfactor.querying.LISIRDQuerying import LISIRDRetriever
 
-from astropy.nddata import VarianceUncertainty, InverseVariance
+from astropy.nddata import VarianceUncertainty, InverseVariance, NDUncertainty
 from astropy.units import Quantity
 from astropy.convolution import convolve, Gaussian1DKernel
 import astropy.units as u
@@ -23,6 +23,14 @@ from typing import List, Dict, Tuple
 
 
 class SolarSpectrum(Spectrum1D):
+
+    """Extension of astropy's Spectrum1D for 
+        1. data loading/querying
+        2. spectral manipulation (stitching, resampling, convolution)
+        3. spectral scaling (match static high-resolution data to dynamic low-resolution data)
+        
+        for more information on Spectrum1D, see https://specutils.readthedocs.io/en/stable/api/specutils.Spectrum1D.html
+        """
     
     daily_retriever = LISIRDRetriever()
     daily_spectra = ["TIMED", "SORCE", "NNL"]
@@ -30,6 +38,20 @@ class SolarSpectrum(Spectrum1D):
 
 
     def __init__(self, name=None, emissions:Dict[str, List[float]]=None, *args, **kwargs):
+
+        """Construct a SolarSpectrum Object: core arguments from Spectrum1D are
+            1. flux, Quantity object (a.k.a array of flux values with units)
+            2. spectral_axis, Quantity object (array of wavelength values with units)
+            3. uncertainty, NDUncertainty object (infers from flux unit if no unit is given)
+
+            For additional information, see https://specutils.readthedocs.io/en/stable/api/specutils.Spectrum1D.html
+            Note that additional attributes may not be maintained by the current methods.
+
+            @param name:
+                identifier for the spectrum
+            @param emissions: optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
+            """
+
         super().__init__(*args, **kwargs)
         
         self._name = name # Useful for distinguishing between SolarSpectrum objects
@@ -37,7 +59,7 @@ class SolarSpectrum(Spectrum1D):
         # Global resolution - slight variation from this value over smaller windows is expected
         self.global_res = (self.spectral_axis[-1] - self.spectral_axis[0]) / len(self.spectral_axis)  
 
-        # Maps feature names (e.g. Lyman-Alpha, CI 1335, etc.) to wavelength bounds, 
+        # Emissions: maps feature identifiers (e.g. Lyman-Alpha, CI 1335, etc.) to wavelength bounds, 
         # integrated fluxes, and local resolution
         self._emissions = {}
         if emissions:
@@ -156,7 +178,7 @@ class SolarSpectrum(Spectrum1D):
         """ Loads the SUMER spectrum and returns it as a Solar Spectrum object. SUMER is compiled from the
         BASS 2000 solar archive (https://bass2000.obspm.fr/solar_spect.php), and represents our 
         best high-resolution capture of solar activity between ~670 and ~1609 Angstroms. Unfortunately,
-        BASS 2000 is not queryable, so there is no failsafe if this file is not identifiable.
+        BASS 2000 is not queryable, so there is no fail-safe if this file is not identifiable.
         
         @param sumer_file: exact filepath for accessing SUMER
         
@@ -587,8 +609,8 @@ class SolarSpectrum(Spectrum1D):
     @staticmethod
     def spectral_overlap(spec1, spec2:'SolarSpectrum'):
 
-        """ Finds the overlapping region of two solar spectra and returns trimmed versions
-        of each spectra over it (but on their own respective axes). No assumptions are made
+        """ Finds the overlapping region of two solar spectra and returns versions of each
+        spectra which are bounded by it (but on their own respective axes). No assumptions are made
         about spectrum location by way of the order of arguments - the left and right spectra
         are identified automatically. 
 
@@ -696,7 +718,6 @@ class SolarSpectrum(Spectrum1D):
             return np.sum(flux * res), res
         else:
             return np.sum(flux * res)
-
 
 
     """ --------------------------------------------------- FEATURE FITTING -------------------------------------------------- """
@@ -846,7 +867,6 @@ class SolarSpectrum(Spectrum1D):
         # Evaluation
         else:
             return output, downsampled_output, dc_output
-
 
 
     def daily_fit(sumer, daily_spec, gaussian_std, poly_degree=6, fit="polynomial"):

@@ -61,30 +61,36 @@ class LISIRDRetriever():
         Retrieves specific data from LISIRD based off of information provided by the user. Automatically returns a
         Pandas dataframe storing the results, and saves to an external file if requested.
 
-        @param ds: string, The dataset to request (see Available Datasets in LATIS documentation)
+        @param ds: 
+            string, The dataset to request (see Available Datasets in LATIS documentation)
 
-        @param prjn: Optional, string list of desired variables: for instance, to target the time, wavelength, and
-        irradiance variables, set prjn = ["time", "wavelength", "irradiance"]. If this parameter is not specified,
-        then all categories will be included. For more information on valid variable identifiers, see the
-        'Available Datasets' section of the LATIS documenation.
+        @param prjn: 
+            Optional, string list of desired variables: for instance, to target the time, wavelength, and
+            irradiance variables, set prjn = ["time", "wavelength", "irradiance"]. If this parameter is not specified,
+            then all categories will be included. For more information on valid variable identifiers, see the
+            'Available Datasets' section of the LATIS documenation.
 
-        @param slctn: Optional, string list of variable constraints: for instance, ["irradiance>1360"] will remove any
-        irradiance values less than 1360. Note that, if seeking to specify time periods with more than just the
-        year, the formatting is YYYY-MM-DDTHH:MM. For example, to find data in a specific time range, slctn would
-        look something like ["time>=2005-05-05T12:00','time<2006-05-05T12:00"]. If this parameter is not specified,
-        then no constraints will be applied.
+        @param slctn: 
+            Optional, string list of variable constraints: for instance, ["irradiance>1360"] will remove any
+            irradiance values less than 1360. Note that, if seeking to specify time periods with more than just the
+            year, the formatting is YYYY-MM-DDTHH:MM. For example, to find data in a specific time range, slctn would
+            look something like ["time>=2005-05-05T12:00','time<2006-05-05T12:00"]. If this parameter is not specified,
+            then no constraints will be applied.
 
-        @param optn: Optional, string list of operations to be applied to the dataset as a whole. For instance,
-        ["replace_missing(NaN)"] will replace any missing values with NaN. If this parameter is not specified,
-        then the "last()" operation will be applied in order to pull the most recent data sample. This can be overridden
-        by setting optn = None or to some other set of operations. However, if no time constraints were previously
-        applied in slctn or a large sample size (n) is requested, then the request may be time-consuming - and
-        could potentially cause an overload error. For more information on valid operations, see the 'Operation Options'
-        section of the LATIS documentation.
+        @param optn: 
+            Optional, string list of operations to be applied to the dataset as a whole. For instance,
+            ["replace_missing(NaN)"] will replace any missing values with NaN. If this parameter is not specified,
+            then the "last()" operation will be applied in order to pull the most recent data sample. This can be overridden
+            by setting optn = None or to some other set of operations. However, if no time constraints were previously
+            applied in slctn or a large sample size (n) is requested, then the request may be time-consuming - and
+            could potentially cause an overload error. For more information on valid operations, see the 'Operation Options'
+            section of the LATIS documentation.
 
-        @param save_results: Boolean, indicates whether the dataset will be saved to an external file
+        @param save_results: 
+            Boolean, indicates whether the dataset will be saved to an external file
 
-        @return: df: resultant dataframe from API request
+        @return: df: 
+            resultant dataframe from API request
         """
         
         # Build full url
@@ -137,11 +143,17 @@ class LISIRDRetriever():
         """ Takes a dataset name to query, as well as optional date and wavelength specifications, and returns a pandas
         dataframe recording the irradiance and uncertainty at each wavelength and time.
         
-        @param dataset: dataset to query, can be found in 'self.datasets'
-        @param date: optional, date to query in 'YYYY-MM-DD' format
-        @param max_queries: optional, integer to specify the maximum number of queries to make before raising an error
+        @param dataset: 
+            dataset to query, can be found in 'self.datasets'
+
+        @param date: 
+            optional, date to query in 'YYYY-MM-DD' format
+
+        @param max_queries: 
+            optional, integer to specify the maximum number of queries to make before raising an error
         
-        @return df: results from API request
+        @return df: 
+            results from API request
         """
         
         # Dataset Identification
