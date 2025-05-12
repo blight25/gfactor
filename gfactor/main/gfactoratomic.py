@@ -1,21 +1,16 @@
 # Standard libraries
-import string
-from typing import List
 from pathlib import Path
 from astropy import units as u
-from astropy.units import Quantity
-from astropy.table import QTable
+from astropy.table import QTable, vstack
+
+from typing import List, Dict, Union
 
 import pandas as pd
-
-from itertools import combinations
 
 from gfactor.querying.NISTQuerying import NISTRetriever
 
 
 class AtomicData:
-
-    subgroups = {'HCOS': ['H', 'C', 'O', 'S']}
         
     elements_by_mass = {
     'H': 1.008, 'He': 4.0026, 'Li': 6.94, 'Be': 9.0122, 'B': 10.81, 'C': 12.011, 
@@ -26,61 +21,82 @@ class AtomicData:
     }
      
     def __init__(self):
+
+        """AtomicData constructor"""
         
         self.retriever = NISTRetriever()
 
 
-    def load_nist(elements: List[str], wavelength_bounds: List[int], ionized=False):
-
-        elements.sort(key = lambda x: AtomicData.elements_by_mass[x]) # Sort list
-        elements_str = ''.join(elements)
-
-        def find_subsets(input_list):
-                subsets = []
-                for r in range(1, len(input_list) + 1):
-                    subsets.extend(combinations(input_list, r))
-                return subsets
+    def load_nist(self, elements: List[str], ionized: bool = False, data_dir=None) -> QTable:
         
-        subsets = {*find_subsets(AtomicData.subgroups['HCOS'])}
+        """
+        Load NIST data for each element in `elements`.
 
-        file = None
-        if tuple(elements) in subsets:
-            if ionized:     
-                file = f"./atomic_data/ionized/{elements_str}_{wavelength_bounds[0]}-{wavelength_bounds[1]}_ionized.csv"
+        Parameters
+        ----------
+        elements : List[str]
+            List of element symbols, e.g. ["H","C","O"].
+        ionized : bool, optional
+            indicates whether or not fetched data should incude ionized transitions
+        data_dir: str, optional
+            If provided, searches for pre-saved files in this directory before attempting to 
+            query NIST.
+
+        Returns
+        -------
+        combined: a single QTable of all elements stacked together.
+        """
+
+        # 1) Sort by atomic mass
+        elements_sorted = sorted(elements, key=lambda el: AtomicData.elements_by_mass[el])
+
+        tables: Dict[str, QTable] = {}
+        retriever = NISTRetriever()
+
+        for el in elements_sorted:
+            # 2) Pick the per-element file
+            if data_dir:
+                if ionized:
+                    path = Path(f"{data_dir}/ionized/{el}_ionized.csv")
+                else:
+                    path = Path(f"{data_dir}/{el}.csv")
+
+            # 3) Read or retrieve
+            if data_dir:
+                if path.exists():
+                    df = pd.read_csv(path)
             else:
-                file = f"./atomic_data/standard/{elements_str}_{wavelength_bounds[0]}-{wavelength_bounds[1]}.csv"
-            file = Path(file)
-        
-        if file and file.exists():
-            nist_data = pd.read_csv(file)
-            
-        else:
-            nist_retriever = NISTRetriever()
-            nist_data = nist_retriever.retrieve(wavelength_bounds=wavelength_bounds, elements=elements, ionized=ionized)
-        
-        nist_data = QTable.from_pandas(nist_data)
-        
-        for col in nist_data.colnames:
-            parts = col.split('(')
-            power = 1
-            if len(parts) > 1:
-                var, unit = parts
-                unit = unit[:-1]
-                parts = unit.split('^')
-                if len(parts) > 1:
-                    unit, power = parts
-                match unit:
-                    case 'A':
-                        unit = u.AA
-                    case 's':
-                        unit = u.s
-                    case 'eV':
-                        unit = u.eV
-                nist_data[col].unit = unit**int(power)
-                
-        return nist_data
+                # retrieve expects a list of elements
+                df = retriever.retrieve(elements=[el], ionized=ionized)
+                if df is None:
+                    raise ValueError(f"No eligible data for element {el}")
+
+            # 4) Convert to QTable and fix units
+            qt = QTable.from_pandas(df)
+            for col in qt.colnames:
+                if "(" in col and col.endswith(")"):
+                    _, unit_str = col.split("(", 1)
+                    unit_str = unit_str[:-1]  # strip trailing ')'
+                    if "^" in unit_str:
+                        base, pow_str = unit_str.split("^", 1)
+                        power = int(pow_str)
+                    else:
+                        base, power = unit_str, 1
+
+                    # map to astropy units
+                    unit_map = {"A": u.AA, "s": u.s, "eV": u.eV}
+                    base_unit = unit_map.get(base)
+                    if base_unit is not None:
+                        qt[col].unit = base_unit ** power
+
+            tables[el] = qt
+
+        # 5) stack and sort by wavelength
+        combined = vstack(list(tables.values()), metadata_conflicts="silent")
+        combined.sort("obs_wl(A)")
+        return combined
 
 
 if __name__ == "__main__":
      atomic_data = AtomicData()
-     nist_data = atomic_data.load_nist(wavelength_bounds=[800, 7000], elements=['H','C', 'O', 'S'])
+     nist_data = atomic_data.load_nist(elements=['H','C','O','S'], join=True)

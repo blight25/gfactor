@@ -1,4 +1,3 @@
-
 # Standard libraries
 import requests
 import io
@@ -14,16 +13,52 @@ from tqdm import tqdm
 import math
 import time
 
+from typing import List, Dict
+
 
 class LISIRDRetriever():
     
-    """ Class for fetching data from LISIRD within the gfactor framework."""
+    """ Class for fetching spectral data from LISIRD within the gfactor framework: for more details
+    on LISIRD, see https://lasp.colorado.edu/lisird/"""
     
-    def __url_build(self, ds):
+    def __url_build(self, ds: str) -> str:
+        """
+        Constructs the first half of the URL from components.
+
+        Parameters:
+        ds : str
+            The dataset to query.
+
+        Returns:
+        str
+            The constructed URL.
+        """
+        
+        """Constructs first half of url from components
+        
+        @param ds: dataset to query
+        @return url
+        """
         url = self.__base_url + ds + "." + "csv"
         return url
 
-    def __param_build(self, prjns, slctns, optns):
+    def __param_build(self, prjns: List[str], slctns: List[str], optns: List[str]) -> str:
+        """
+        Constructs specifications to be applied on requested data.
+
+        Parameters:
+        prjns : list of str
+            Variables to return - defaults to all variables.
+        slctns : list of str
+            Variable constraints.
+        optns : list of str
+            Operations to be applied.
+
+        Returns:
+        str
+            URL component containing specification instructions.
+        """
+
         # Initialize variables
         no_ampersand = True
         params = ""
@@ -55,42 +90,24 @@ class LISIRDRetriever():
 
         return params
     
-    def __query(self, ds: str, prjn = None, slctn = None, optn = None) -> pd.DataFrame:
-        
+    
+    def __query(self, ds: str, prjn: List[str] = None, slctn: List[str] = None, optn: List[str] = None) -> pd.DataFrame:
         """
-        Retrieves specific data from LISIRD based off of information provided by the user. Automatically returns a
-        Pandas dataframe storing the results, and saves to an external file if requested.
+        Retrieves specific data from LISIRD using the LATIS framework.
 
-        @param ds: 
-            string, The dataset to request (see Available Datasets in LATIS documentation)
+        Parameters:
+        ds : str
+            The dataset to request.
+        prjn : list of str, optional
+            Desired variables, e.g., ["time", "wavelength", "irradiance"]. Defaults to all categories.
+        slctn : list of str, optional
+            Variable constraints, e.g., ["irradiance>1360"].
+        optn : list of str, optional
+            Operations to apply, e.g., ["replace_missing(NaN)"].
 
-        @param prjn: 
-            Optional, string list of desired variables: for instance, to target the time, wavelength, and
-            irradiance variables, set prjn = ["time", "wavelength", "irradiance"]. If this parameter is not specified,
-            then all categories will be included. For more information on valid variable identifiers, see the
-            'Available Datasets' section of the LATIS documenation.
-
-        @param slctn: 
-            Optional, string list of variable constraints: for instance, ["irradiance>1360"] will remove any
-            irradiance values less than 1360. Note that, if seeking to specify time periods with more than just the
-            year, the formatting is YYYY-MM-DDTHH:MM. For example, to find data in a specific time range, slctn would
-            look something like ["time>=2005-05-05T12:00','time<2006-05-05T12:00"]. If this parameter is not specified,
-            then no constraints will be applied.
-
-        @param optn: 
-            Optional, string list of operations to be applied to the dataset as a whole. For instance,
-            ["replace_missing(NaN)"] will replace any missing values with NaN. If this parameter is not specified,
-            then the "last()" operation will be applied in order to pull the most recent data sample. This can be overridden
-            by setting optn = None or to some other set of operations. However, if no time constraints were previously
-            applied in slctn or a large sample size (n) is requested, then the request may be time-consuming - and
-            could potentially cause an overload error. For more information on valid operations, see the 'Operation Options'
-            section of the LATIS documentation.
-
-        @param save_results: 
-            Boolean, indicates whether the dataset will be saved to an external file
-
-        @return: df: 
-            resultant dataframe from API request
+        Returns:
+        pd.DataFrame
+            Resultant DataFrame from the API request.
         """
         
         # Build full url
@@ -110,6 +127,17 @@ class LISIRDRetriever():
     
 
     def __init__(self):
+        """
+        LISIRDRetriever object constructor.
+
+        Initializes the base URL and dataset metadata for querying.
+
+        Attributes:
+        __base_url : str
+            Base URL for LISIRD API.
+        datasets : dict
+            Nested dictionary containing dataset metadata.
+        """
       
         self.__base_url = "https://lasp.colorado.edu/lisird/latis/dap/"
 
@@ -122,7 +150,16 @@ class LISIRDRetriever():
                         }
     
 
-    def dataset_names(self):
+    def dataset_names(self) -> Dict[str, List[str]]:
+
+        """
+        Maps dataset names to their respective subsets.
+
+        Returns:
+        dict
+            Dictionary mapping dataset names to lists of subsets. If no subsets exist, maps to [None].
+        """
+
         # Dataset Identification
         names = {}
         for key in list(self.datasets.keys()):
@@ -138,22 +175,23 @@ class LISIRDRetriever():
         return names
     
 
-    def retrieve(self, dataset:str, subset=None, date=None, max_queries=10) -> pd.DataFrame:
-        
-        """ Takes a dataset name to query, as well as optional date and wavelength specifications, and returns a pandas
-        dataframe recording the irradiance and uncertainty at each wavelength and time.
-        
-        @param dataset: 
-            dataset to query, can be found in 'self.datasets'
+    def retrieve(self, dataset: str, subset: str = None, date: str = None, max_queries: int = 10) -> pd.DataFrame:
+        """
+        Queries a dataset and returns a DataFrame of irradiance and uncertainty at each wavelength and time.
 
-        @param date: 
-            optional, date to query in 'YYYY-MM-DD' format
+        Parameters:
+        dataset : str
+            Dataset to query, found in 'self.datasets'.
+        subset : str, optional
+            Subset of the dataset to query. Defaults to the most recent subset.
+        date : str, optional
+            Date to query in 'YYYY-MM-DD' format. Required.
+        max_queries : int, optional
+            Maximum number of queries before raising an error. Default is 10.
 
-        @param max_queries: 
-            optional, integer to specify the maximum number of queries to make before raising an error
-        
-        @return df: 
-            results from API request
+        Returns:
+        pd.DataFrame
+            Results from the API request.
         """
         
         # Dataset Identification
@@ -253,10 +291,35 @@ class LISIRDRetriever():
             return df
     
 
-    def extract(self, dataset="NNL", subset=None, start_date:str=None, end_date:str=None, 
-                interval:int=1, save_dir="./data/spectra", log_dir="./data/spectra/log",
-                error_dir="./data/errors", overwrite=False):
-        
+    def extract(self, dataset: str = "NNL", subset: str = None, start_date: str = None, end_date: str = None, 
+                interval: int = 1, save_dir: str = "./data/spectra", log_dir: str = "./data/spectra/log",
+                error_dir: str = "./data/errors", overwrite: bool = False):
+        """
+        Extracts spectral data for a given dataset and saves it locally.
+
+        Parameters:
+        dataset : str, optional
+            Dataset to query. Default is "NNL".
+        subset : str, optional
+            Subset of the dataset to query. Queries all subsets if None.
+        start_date : str, optional
+            Start date for querying in 'YYYY-MM-DD' format. Defaults to dataset's minimum date.
+        end_date : str, optional
+            End date for querying in 'YYYY-MM-DD' format. Defaults to dataset's maximum date.
+        interval : int, optional
+            Interval in days for querying. Default is 1.
+        save_dir : str, optional
+            Directory to save spectral data. Default is "./data/spectra".
+        log_dir : str, optional
+            Directory to save query logs. Default is "./data/spectra/log".
+        error_dir : str, optional
+            Directory to save error logs. Default is "./data/errors".
+        overwrite : bool, optional
+            Whether to overwrite existing files. Default is False.
+
+        Returns:
+        None
+        """
         # Dataset Identification
         names = self.dataset_names()
         dataset = dataset.upper()
@@ -448,4 +511,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

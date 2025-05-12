@@ -43,7 +43,17 @@ class gfactor:
 
     @staticmethod
     def __joule_to_photons(spectrum):
-        """Convenience function to convert the energy flux in W/m^2 to a photon flux in cm^-2"""
+        """
+        Converts the energy flux in W/m^2 to a photon flux in cm^-2.
+
+        Parameters:
+        spectrum : Spectrum
+            The input spectrum with energy flux in W/m^2.
+
+        Returns:
+        Spectrum
+            The spectrum with photon flux in cm^-2.
+        """
 
         # W/m^2/A to erg/cm^2/s/A
         spectrum = spectrum.with_flux_unit(unit=u.erg / u.cm**2 / u.s / u.AA)
@@ -56,20 +66,20 @@ class gfactor:
 
     @staticmethod
     def __extract_state_data(nist_table, row_idx, line):
-        
-        """Extracts atomic data from NIST Dataframe for the current emission line and state.
+        """
+        Extracts atomic data from NIST Dataframe for the current emission line and state.
 
-        @param nist_table:
-            Atomic data from NIST
+        Parameters:
+        nist_table : pd.DataFrame
+            Atomic data from NIST.
+        row_idx : int
+            Row index to extract from the NIST table.
+        line : Quantity
+            Emission wavelength in Angstroms.
 
-        @param row_idx: 
-            row to index from nist_table
-
-        @param line: 
-            emission wavelength
-
-        @return constants: 
-            dictionary of atomic transition data
+        Returns:
+        dict
+            Dictionary containing atomic transition data.
         """
 
         row = nist_table[row_idx]
@@ -104,18 +114,19 @@ class gfactor:
     
 
     def __get_state_prob(self, constants, T):
-        
-        """Calculates Boltzmann factors for all possible rotational energy states and determines the
+        """
+        Calculates Boltzmann factors for all possible rotational energy states and determines the
         associated probability of the current state.
 
-        @param constants: 
-            dictionary containing atomic transition data
+        Parameters:
+        constants : dict
+            Dictionary containing atomic transition data.
+        T : float
+            Temperature in Kelvin.
 
-        @param T: 
-            temperature in Kelvin
-
-        @return prob: 
-            current state probability
+        Returns:
+        float
+            Current state probability.
         """
 
         states = (2 * constants['J_i_other'] + 1) * np.exp(constants['Ei_other'] / (gfactor.k * T))
@@ -126,24 +137,25 @@ class gfactor:
         return prob
     
 
-    def __get_gfactors(self, nist_table:pd.DataFrame, spectrum:SolarSpectrum, T:float, hel_v:float, hel_d:float):
-        
-        """Calculates gfactors for the given atomic transition data, solar spectrum, 
-        temperature, and heliocentric conditions."
+    def __get_gfactors(self, nist_table: pd.DataFrame, spectrum: SolarSpectrum, T: float, hel_v: float, hel_d: float):
+        """
+        Calculates gfactors for the given atomic transition data, solar spectrum, 
+        temperature, and heliocentric conditions.
 
-        @param nist_table: 
-            Atomic Data from NIST
-        @param spectrum:
-            SolarSpectrum object
+        Parameters:
+        nist_table : pd.DataFrame
+            Atomic data from NIST.
+        spectrum : SolarSpectrum
+            Solar spectrum object.
+        T : float
+            Temperature in Kelvin.
+        hel_v : float
+            Heliocentric velocity in cm/s.
+        hel_d : float
+            Heliocentric distance in AU.
 
-        @param T: 
-            temperature in Kelvin
-
-        @param hel_v: 
-            heliocentric velocity in cm/s
-
-        @param hel_d: 
-            heliocentric distance in AU
+        Returns:
+        None
         """
 
         for i in range(len(nist_table['obs_wl(A)'])):
@@ -182,30 +194,26 @@ class gfactor:
             
 
     def gfactors(self, elements: List[str], wavelength_bounds=[800, 6000], date="2019-12-19", T=300, hel_d=1, hel_v=5) -> pd.DataFrame:
-        
-        """Calculates gfactors for a given set of atomic species and helocentric conditions.
-        
-        @param elements: 
-            list of elements to analyze, e.g. [H, Na, S, ...]
+        """
+        Calculates gfactors for a given set of atomic species and heliocentric conditions.
 
-        @param wavelength_bounds: 
-            bounds of the form [lower bound, upper bound] - expected in units of Angstrom
+        Parameters:
+        elements : list of str
+            List of elements to analyze, e.g., ['H', 'Na', 'S', ...].
+        wavelength_bounds : list of int, optional
+            Bounds of the form [lower bound, upper bound] in Angstroms. Default is [800, 6000].
+        date : str, optional
+            Date of observation in the form "YYYY-MM-DD". Default is "2019-12-19".
+        T : float, optional
+            Temperature in Kelvin. Default is 300.
+        hel_d : float, optional
+            Heliocentric distance in AU. Default is 1.
+        hel_v : float, optional
+            Heliocentric velocity in km/s. Default is 5.
 
-        @param date: 
-            date of observation, given in the form "YYYY-MM-DD"
-
-        @param T: 
-            temperature in Kelvin
-
-        @param hel_d: 
-            heliocentric distance (distance from comet to the sun, in AU)
-
-        @param hel_v: 
-            heliocentric velocity (velocity relative to the sun, in km/s)
-        
-        @return gf_dataframe: 
-            pandas dataframe containing elements, wavelengths, and associated gfactors
-        
+        Returns:
+        pd.DataFrame
+            DataFrame containing elements, wavelengths, and associated gfactors.
         """
         
         # ****************************************** DATA RETRIEVAL ********************************************
@@ -234,7 +242,7 @@ class gfactor:
                                                    fit="polynomial")
         
 
-        # 3. Stitch everything together into a single spectrum
+        # 3. Stitch together into a single spectrum
         sumer_sumer_scaled = SolarSpectrum.stitch(spec_left=sumer, spec_right=sumer_scaled,
                                                   priority="right", coverage=.01, max_res_percentile=0)
         
@@ -243,8 +251,6 @@ class gfactor:
         
         
         # **************************************** G-FACTOR CALCULATION ********************************************
-
-        # 1. Unit Conversions
         
         # Solar flux: W/m^2/A to phts/cm^2/s/A, velocity: km/s to cm/s
         spectrum = self.__joule_to_photons(spectrum)
@@ -254,7 +260,7 @@ class gfactor:
         # Calculate g-factors
         self.__get_gfactors(nist_table, spectrum, T*u.K, hel_v, hel_d*u.AU)
 
-        # 3. Generate g-factor dataframe
+        # Generate g-factor DataFrame
         gf_dataframe = pd.DataFrame(list(zip(self._ion_id, self._lines, self._g_factors)),
                                          columns=['Ion ID', 'Wavelength (Angstroms)', 'g-factor (phts s^-1)'])
         self._gf_dataframe = gf_dataframe

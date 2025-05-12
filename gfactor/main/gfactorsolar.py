@@ -47,9 +47,12 @@ class SolarSpectrum(Spectrum1D):
             For additional information, see https://specutils.readthedocs.io/en/stable/api/specutils.Spectrum1D.html
             Note that additional attributes may not be maintained by the current methods.
 
-            @param name:
+            Parameters
+            ----------
+            name: str
                 identifier for the spectrum
-            @param emissions: optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
+            emissions: dict
+                optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
             """
 
         super().__init__(*args, **kwargs)
@@ -111,7 +114,17 @@ class SolarSpectrum(Spectrum1D):
         "Wavelengths": [lower wavelength bound, upper wavelength bound], 
         "Resolution": res, 
         "Integrated Flux": i_flux}
-        }"""
+        }
+
+        Parameters
+        ----------
+        new_emissions : Dict[str, List[float]]
+            Dictionary of emission features to initialize or overwrite.
+
+        Returns
+        -------
+        None
+        """
 
         for emission in list(new_emissions.keys()):
                 bounds = new_emissions[emission]
@@ -150,8 +163,17 @@ class SolarSpectrum(Spectrum1D):
         "Wavelengths": [lower wavelength bound, upper wavelength bound], 
         "Resolution": res, 
         "Integrated Flux": i_flux}
-        }"""
+        }
 
+        Parameters
+        ----------
+        new_emissions : Dict[str, List[float]]
+            Dictionary of new emission features to add.
+
+        Returns
+        -------
+        None
+        """
         for emission in list(new_emissions.keys()):
                 bounds = new_emissions[emission]
                 if not isinstance(bounds, Quantity):
@@ -179,12 +201,18 @@ class SolarSpectrum(Spectrum1D):
         BASS 2000 solar archive (https://bass2000.obspm.fr/solar_spect.php), and represents our 
         best high-resolution capture of solar activity between ~670 and ~1609 Angstroms. Unfortunately,
         BASS 2000 is not queryable, so there is no fail-safe if this file is not identifiable.
-        
-        @param sumer_file: exact filepath for accessing SUMER
-        
-        @param emissions: optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
 
-        @return spectrum: SUMER spectrum as a SolarSpectrum object
+        Parameters
+        ----------
+        sumer_file : str
+            Exact filepath for accessing SUMER.
+        emissions : Dict[str, List[float]], optional
+            Dictionary of emission features - see 'SolarSpectrum.emissions' for details.
+
+        Returns
+        -------
+        spectrum : SolarSpectrum
+            SUMER spectrum as a SolarSpectrum object
          """
 
         # Read in SUMER file
@@ -225,24 +253,30 @@ class SolarSpectrum(Spectrum1D):
                  
         3. {TIMED: https://lasp.colorado.edu/lisird/data/timed_see_ssi_l3}
 
-        
         For spectra with both high and low resolution designations, both versions will be loaded
         and returned as tuple of SolarSpectrum objects (high-res, low-res): can always
         check '.name' attribute to confirm which is which. Note that the chosen date may not always 
         be valid for both subsets - in this case, the unavailable subset will be set to None.
-        
+
         Otherwise, the first tuple value will be a SolarSpectrum, and the second will be None.
 
-        @param dataset: string dataset name - can be lower or uppercase
-        
-        @param emissions: optional dictionary of emission features - see 'SolarSpectrum.emissions' for details
-        
-        @param daily_dir: specifies where to search for existing solar files. If no match is found, data
-        will be queried from LISIRD directly (this may take a few seconds).
+        Parameters
+        ----------
+        date : str
+            Date for the spectrum.
+        dataset : str, optional
+            String dataset name - can be lower or uppercase.
+        emissions : Dict[str, List[float]], optional
+            Dictionary of emission features - see 'SolarSpectrum.emissions' for details.
+        daily_dir : str, optional
+            Specifies where to search for existing solar files. If no match is found, data
+            will be queried from LISIRD directly (this may take a few seconds).
 
-        @return specs = (spec_1, spec_2): high-resolution and low-resolution Solar Spectrum objects (subject to the caveats
-        listed above).
-
+        Returns
+        -------
+        specs : Tuple[Optional[SolarSpectrum], Optional[SolarSpectrum]]
+            High-resolution and low-resolution Solar Spectrum objects (subject to the caveats
+            listed above).
         """
         dataset = dataset.upper()
         if dataset not in SolarSpectrum.daily_spectra:
@@ -287,20 +321,22 @@ class SolarSpectrum(Spectrum1D):
 
 
     @staticmethod
-    def resample(spec:'SolarSpectrum', new_axis:Quantity):
+    def resample(spec: 'SolarSpectrum', new_axis: Quantity):
+        """
+        Resamples the flux from a given spectrum's solar axis onto a new axis using astropy's FluxConservingResampler.
 
-        """Resample the flux from a given spectrum's solar axis onto a
-         new axis, using astropy's FluxConservingResampler. See 
-         https://specutils.readthedocs.io/en/stable/api/specutils.manipulation.FluxConservingResampler.html
-         for more details.
-         
-         @param spec: SolarSpectrum object
-         @param new_axis: Quantity object, new axis for resampling. Note
-         that the new axis unit must match the units of spec.spectral_axis.
-         
-         @return resampled_spectra: a new SolarSpectrum object, with
-         spectral_axis = new_axis
-         """
+        Parameters
+        ----------
+        spec : SolarSpectrum
+            The spectrum to be resampled.
+        new_axis : Quantity
+            The new spectral axis for resampling. Units must match the units of `spec.spectral_axis`.
+
+        Returns
+        -------
+        resampled_spectra : SolarSpectrum
+            A new SolarSpectrum object with the flux resampled onto the new spectral axis.
+        """
         
         # Check unit compatibility
         if spec.spectral_axis.unit != new_axis.unit:
@@ -330,18 +366,19 @@ class SolarSpectrum(Spectrum1D):
         return resampled_spectra
     
     
-    def _resample(self, new_axis):
+    def _resample(self, new_axis: Quantity):
+        """
+        Resamples the flux of the current spectrum in-place onto a new spectral axis using astropy's FluxConservingResampler.
 
-        """Resamples self.flux in-place from self.spectral_axis onto a
-         new axis, using astropy's FluxConservingResampler. See 
-         https://specutils.readthedocs.io/en/stable/api/specutils.manipulation.FluxConservingResampler.html
-         for more details.
-         
-         @param spec: SolarSpectrum object
-         @param new_axis: Quantity object, new axis for resampling. Note
-         that the new axis unit must match the units of spec.spectral_axis.
-        
-         """
+        Parameters
+        ----------
+        new_axis : Quantity
+            The new spectral axis for resampling. Units must match the units of `self.spectral_axis`.
+
+        Returns
+        -------
+        None
+        """
         
         # Check unit compatability
         if self.spectral_axis.unit != new_axis.unit:
@@ -372,16 +409,22 @@ class SolarSpectrum(Spectrum1D):
         
     
     @staticmethod
-    def convolution(spec:'SolarSpectrum', std=1):
+    def convolution(spec: 'SolarSpectrum', std: float = 1):
+        """
+        Performs a Gaussian convolution on the given spectrum's flux and returns a new SolarSpectrum object.
 
-        """Performs a Gaussian convolution on the given spectrum's flux
-         and returns it on the same spectral axis as a new SolarSpectrum object.
-        
-         @param spec: spectrum to be convolved
-         @param std: standard deviation for the Gaussian kernel
+        Parameters
+        ----------
+        spec : SolarSpectrum
+            The spectrum to be convolved.
+        std : float, optional
+            Standard deviation for the Gaussian kernel. Default is 1.
 
-         @return convolved_spectra: SolarSpectrum with convolved flux
-          """
+        Returns
+        -------
+        convolved_spectra : SolarSpectrum
+            A new SolarSpectrum object with convolved flux.
+        """
         
         kernel = Gaussian1DKernel(stddev=std)
         convolved_flux = convolve(spec.flux, kernel=kernel)
@@ -398,13 +441,18 @@ class SolarSpectrum(Spectrum1D):
         return convolved_spectra
     
     
-    def _convolution(self, std=1):
+    def _convolution(self, std: float = 1):
+        """
+        Performs a Gaussian convolution in-place on the flux of the current spectrum.
 
-        """Performs a Gaussian convolution in-place on self.flux.
-    
-        @param spec: spectrum to be convolved
-        @param std: standard deviation for the Gaussian kernel
+        Parameters
+        ----------
+        std : float, optional
+            Standard deviation for the Gaussian kernel. Default is 1.
 
+        Returns
+        -------
+        None
         """
     
         kernel = Gaussian1DKernel(stddev=std)
@@ -424,58 +472,32 @@ class SolarSpectrum(Spectrum1D):
         
 
     @staticmethod
-    def stitch(spec_left:'SolarSpectrum', spec_right: 'SolarSpectrum', priority="left",
-               coverage=.10, max_res_percentile=.05, return_stitch_points=False):
-        
-        """Stitches two solar spectra together in their region of overlap. 
-        The location at which this occurs is dictated by the 'priority' and 
-        two hyperparameters: 'coverage', and 'max_res_percentile', both bounded from 0 to 1.
-        
-        @param spec_left: 
-            spectrum that 'runs left', or more precisely, has the
-            smaller left-side wavelength bound.
+    def stitch(spec_left: 'SolarSpectrum', spec_right: 'SolarSpectrum', priority: str = "left",
+               coverage: float = 0.10, max_res_percentile: float = 0.05, return_stitch_points: bool = False):
+        """
+        Stitches two spectra together, prioritizing one over the other in overlapping regions.
 
-        @param spec_right: 
-            spectrum that 'runs right', or has the larger right-side
-            wavelength bound.
+        Parameters
+        ----------
+        spec_left : SolarSpectrum
+            The left spectrum to stitch.
+        spec_right : SolarSpectrum
+            The right spectrum to stitch.
+        priority : str, optional
+            Priority for overlapping regions ('left' or 'right'). Default is 'left'.
+        coverage : float, optional
+            Fraction of overlap to consider for stitching. Default is 0.10.
+        max_res_percentile : float, optional
+            Maximum residual percentile for filtering. Default is 0.05.
+        return_stitch_points : bool, optional
+            Whether to return stitch points. Default is False.
 
-        @param priority : 
-            indicates which spectrum to preserve as long as possible. for
-            instance, if spec_left is judged to be of better quality (higher resolution, 
-            lower uncertainty, etc.) than spec_right, then we should set priority = 'left' to
-            avoid cutting it off prematurely (especially if the overlapping region is large).
-            Additionally, when identifying the overlapping region, the spectrum with LOWER priority is interpolated
-            on the axis of the spectrum with HIGHER priority - i.e., only the lower priority spectrum
-            is approximated.
-        
-        @param coverage (0 <= c <= 1): 
-            if priority = left, filters out the first (1 - coverage)*100% of wavelengths. 
-                For instance, priority = left and coverage = .9 -> ignore first 90% of overlap.
-                Conceptually, as coverage grows, the later we try to stitch (potentially at the cost of a smooth
-                transition)
-            if priority = right, filters out the last (1 - coverage)*100% of wavelengths
-                For instance, priority = right and coverage = .9 -> ignore final 90% of overlap.
-                In this case, as coverage grows, the earlier we try to stitch (with the same potential drawback)
-        
-        @param max_res_percentile (0 <= mr <= 1): 
-            same behavior for priority = 'left' or 'right'. Given an array of residuals 
-            (in the region allowed by 'coverage'), applies an additional filter, such that any
-            wavelengths with a residual > max_res_percentile*100% is removed. 
-            For instance, if max_res_percentile = .10, then we would like to only consider wavelengths
-            where the flux residuals (between left and right spectrum) are below the 10th percentile. 
-            Conceptually, as max_res_percentile shrinks, the stricter our margin for error becomes (but
-            we may be forced to stitch earlier/later than might otherwise be preferred)
-        
-        @param return_stitch_points: 
-            optional: returns the final candidates after filtering by coverage and residual, if set to 
-            True.
-        
-        @return stitched_spectrum: 
-            single SolarSpectrum object of combined spectra
-        
-        @return stitch_waves:
-            final candidate stitch wavelengths (only if return_stitch_points = True)
-
+        Returns
+        -------
+        stitched_spectrum : SolarSpectrum
+            The stitched spectrum.
+        stitch_points : Optional[List[float]]
+            Stitch points if `return_stitch_points` is True.
         """
         
         # Check flux unit compatability
@@ -607,23 +629,24 @@ class SolarSpectrum(Spectrum1D):
        
         
     @staticmethod
-    def spectral_overlap(spec1, spec2:'SolarSpectrum'):
+    def spectral_overlap(spec1: 'SolarSpectrum', spec2: 'SolarSpectrum'):
+        """
+        Finds the overlapping region of two solar spectra and returns versions of each spectrum
+        bounded by the overlap region. The left and right spectra are identified automatically.
 
-        """ Finds the overlapping region of two solar spectra and returns versions of each
-        spectra which are bounded by it (but on their own respective axes). No assumptions are made
-        about spectrum location by way of the order of arguments - the left and right spectra
-        are identified automatically. 
+        Parameters
+        ----------
+        spec1 : SolarSpectrum
+            The first SolarSpectrum object.
+        spec2 : SolarSpectrum
+            The second SolarSpectrum object. Units between `spec1` and `spec2` must be compatible.
 
-        @param spec1: 
-            SolarSpectrum object
-
-        @param spec2: 
-            Also a SolarSpectrum object - units between spec1 and spec2 should
-            be compatible
-        
-        @return spec1_overlap - SolarSpectrum of spec1, bounded by the region of overlap
-
-        @return spec2_overlap = SolarSpectrum of spec2, bounded by the region of overlap      
+        Returns
+        -------
+        spec1_overlap : SolarSpectrum
+            A SolarSpectrum object of `spec1` bounded by the overlap region.
+        spec2_overlap : SolarSpectrum
+            A SolarSpectrum object of `spec2` bounded by the overlap region.
         """
 
         # Check flux unit compatability
@@ -676,21 +699,24 @@ class SolarSpectrum(Spectrum1D):
         return spec1_overlap, spec2_overlap
 
 
-    def integrated_flux(self, bounds:List[float]=None, return_res=False):
+    def integrated_flux(self, bounds: List[float] = None, return_res: bool = False):
+        """
+        Calculates the integrated flux for the spectrum over a specified emission feature.
 
-        """Calculates the integrated flux for the spectrum over a specified emission feature. 
-        Units on the bounds aren't necessary, they can be inferred from the SolarSpectrum object.
+        Parameters
+        ----------
+        bounds : List[float], optional
+            Wavelength bounds in the form [lower bound, upper bound]. If None, calculates the
+            integrated flux of the entire spectrum.
+        return_res : bool, optional
+            If True, also returns the resolution over the feature.
 
-        @param bounds: 
-            wavelength bounds, in the form [lower bound, upper bound]. If bounds are set to None, 
-            returns the integrated flux of the whole spectrum
-
-        @param return_res: 
-            returns the resolution over the feature, if set to True
-
-        @return integrated_flux
-        @return res (if return_res = True)
-         
+        Returns
+        -------
+        integrated_flux : float
+            The integrated flux over the specified bounds or the entire spectrum.
+        res : float, optional
+            The resolution over the feature, returned only if `return_res` is True.
         """
         
         # Specific feature
@@ -724,44 +750,54 @@ class SolarSpectrum(Spectrum1D):
 
 
     def _gaussian_func(params, feature_waves, feature_flux):
+        """
+        Gaussian fit function for feature fitting with the lmfit package.
 
-        """ Gaussian fit function for feature fitting with the lmfit package """
+        Parameters
+        ----------
+        params : lmfit.Parameters
+            The parameters for the Gaussian fit.
+        feature_waves : Quantity
+            The wavelengths of the feature to fit.
+        feature_flux : Quantity
+            The flux values of the feature to fit.
+
+        Returns
+        -------
+        residuals : np.ndarray
+            The residuals between the model and the feature flux.
+        """
     
         vals = params.valuesdict()
         model = vals['height']*np.exp(-.5*np.square((feature_waves.value - vals['mean']) / vals['std']))
         return model - feature_flux.value
 
 
-    def feature_fit(self, feature:List[float], height=1, mean=0, std=1):
+    def feature_fit(self, feature: List[float], height: float = 1, mean: float = 0, std: float = 1):
+        """
+        Fits a Gaussian to a given emission feature using initial parameter guesses.
 
-        """Fit a Gaussian to a given emission feature, using the given fitting function and initial
-        parameter guesses. Units on the feature bounds aren't necessary, they can be inferred 
-        from the SolarSpectrum object.
+        Parameters
+        ----------
+        feature : List[float]
+            Wavelength bounds in the form [lower bound, upper bound].
+        height : float, optional
+            Initial guess for the Gaussian height. Default is 1.
+        mean : float, optional
+            Initial guess for the Gaussian center. Default is 0.
+        std : float, optional
+            Initial guess for the Gaussian spread. Default is 1.
 
-        @param feature: 
-            wavelength bounds, of the form [lower bound, upper bound]
-
-        @param height: 
-            initial guess for the height of the Gaussian
-
-        @param mean: 
-            initial guess for the center of the Gaussian
-
-        @param std: 
-            initial guesss for the spread of the Gaussian
-
-        @return height: 
-            fitted height
-
-        @return mean: 
-            fitted mean
-
-        @return std: 
-            fitted std
-
-        @return pixel_std: 
-            for constructing Gaussian kernels using Gaussian1DKernel, 
-            need spread in pixels, not wavelength
+        Returns
+        -------
+        height : Quantity
+            The fitted height of the Gaussian.
+        mean : Quantity
+            The fitted mean of the Gaussian.
+        std : Quantity
+            The fitted standard deviation of the Gaussian.
+        pixel_std : float
+            The standard deviation in pixel space for Gaussian kernel construction.
         """
         
         # Set up lmfit parameters
@@ -797,9 +833,32 @@ class SolarSpectrum(Spectrum1D):
     """ --------------------------------------------------- SPECTRUM FITTING -------------------------------------------------- """
 
 
-    def _poly_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress=False):
+    def _poly_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress: bool = False):
+        """
+        Polynomial fit function for spectrum fitting (SUMER to daily spectra) using lmfit.
 
-        """Polynomial fit function for spectrum fitting (SUMER to daily spectra) using lmfit """
+        Parameters
+        ----------
+        params : lmfit.Parameters
+            The parameters for the polynomial fit.
+        sumer : SolarSpectrum
+            The SUMER spectrum to fit.
+        daily_spec : SolarSpectrum
+            The daily spectrum to match.
+        gaussian_std : Quantity
+            The standard deviation for the Gaussian kernel, in pixel space.
+        regress : bool, optional
+            If True, used for training. If False, used for evaluation. Default is False.
+
+        Returns
+        -------
+        output : SolarSpectrum
+            The model output (SUMER scaled).
+        downsampled_output : SolarSpectrum
+            The output after downsampling.
+        dc_output : SolarSpectrum
+            The output after downsampling and convolution.
+        """
         
         # Coefficients
         coeffs = params.valuesdict()
@@ -830,9 +889,32 @@ class SolarSpectrum(Spectrum1D):
             return output, downsampled_output, dc_output
 
 
-    def _legendre_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress=False):
+    def _legendre_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress: bool = False):
+        """
+        Legendre fit function for spectrum fitting (SUMER to daily spectra) using lmfit.
 
-        """Legendre fit function for spectrum fitting (SUMER to daily spectra) using lmfit"""
+        Parameters
+        ----------
+        params : lmfit.Parameters
+            The parameters for the Legendre fit.
+        sumer : SolarSpectrum
+            The SUMER spectrum to fit.
+        daily_spec : SolarSpectrum
+            The daily spectrum to match.
+        gaussian_std : Quantity
+            The standard deviation for the Gaussian kernel, in pixel space.
+        regress : bool, optional
+            If True, used for training. If False, used for evaluation. Default is False.
+
+        Returns
+        -------
+        output : SolarSpectrum
+            The model output (SUMER scaled).
+        downsampled_output : SolarSpectrum
+            The output after downsampling.
+        dc_output : SolarSpectrum
+            The output after downsampling and convolution.
+        """
         
         # Constructs Legendre polynomial of degree n
         def leg_n(x, n):
@@ -869,60 +951,55 @@ class SolarSpectrum(Spectrum1D):
             return output, downsampled_output, dc_output
 
 
-    def daily_fit(sumer, daily_spec, gaussian_std, poly_degree=6, fit="polynomial"):
+    def daily_fit(sumer: 'SolarSpectrum', daily_spec: 'SolarSpectrum', gaussian_std: Quantity,
+                  poly_degree: int = 6, fit: str = "polynomial"):
 
-        """Finds a polynomial scaling transformation which fits SUMER to a daily spectrum.
-        
-        @param sumer:
-            SUMER SolarSpectrum object
+        """
+        Finds a polynomial scaling transformation which fits SUMER to a daily spectrum.
 
-        @param daily_spec:
-            daily (NNL, SORCE, TIMED) daily spectrum
+        Parameters
+        ----------
+        sumer : SolarSpectrum
+            SUMER SolarSpectrum object.
+        daily_spec : SolarSpectrum
+            Daily (NNL, SORCE, TIMED) daily spectrum.
+        gaussian_std : Quantity
+            Standard deviation (in pixel space) for Gaussian convolution. Identify a feature 
+            on the daily spectrum and run 'feature_fit' first to obtain a reliable estimate.
+        poly_degree : int, optional
+            Degree of the transformation. Default is 6.
+        fit : str, optional
+            If "polynomial", uses standard polynomial fit function. Otherwise, uses a Legendre polynomial fit function. Default is "polynomial".
 
-        @param gaussian std:
-            standard deviation (in pixel space) for Gaussian convolution - identify a feature 
-            on the daily spectrum and run 'feature_fit' first, to obtain a reliable estimate.
-        
-        @param poly_degree:
-            degree of the transformation
-        
-        @param fit:
-            if fit = polynomial, uses standard polynomial fit function
-            Otherwise, uses a legendre polynomial fit function
-        
-        @return output: 
-            SolarSpectrum object, SUMER scaled to match daily spectrum
-        
-        @return downsampled_output:
-            SolarSpectrum object, SUMER scaled + downsampling
-        
-        @return dc_output:
-            SolarSpectrum object, SUMER scaled + downsampling + convolution 
-            (This is what is directly compared to the daily spectrum for training
-            and visualization)
-        
-        @return fitted_params:
-            fit coefficients for the polynomial transformation, f(x), which is applied
-            to SUMER as g(x) = f(x)*SUMER.flux
-        
+        Returns
+        -------
+        output : SolarSpectrum
+            SUMER scaled to match the daily spectrum.
+        downsampled_output : SolarSpectrum
+            SUMER scaled and downsampled.
+        dc_output : SolarSpectrum
+            SUMER scaled, downsampled, and convolved. This is directly compared to the daily spectrum for training and visualization.
+        fitted_params : lmfit.Parameters
+            Fit coefficients for the polynomial transformation, f(x), which is applied
+            to SUMER as g(x) = f(x) * SUMER.flux.
         """
 
         # Ensure that only region of overlap is considered
         overlap_tolerance = 1 * daily_spec.spectral_axis.unit
         runs_left = np.abs(sumer.spectral_axis[0] - daily_spec.spectral_axis[0]) > overlap_tolerance
         runs_right = np.abs(sumer.spectral_axis[-1] - daily_spec.spectral_axis[-1]) > overlap_tolerance
-        if runs_left or runs_right: 
+        if runs_left or runs_right:
             sumer, daily_spec = SolarSpectrum.spectral_overlap(sumer, daily_spec)
-        
+
         # Check flux unit compatibility
         if sumer.flux.unit != daily_spec.flux.unit:
             raise ValueError(f"Inconsistent units: SUMER flux with units '{sumer.flux.unit}' is incompatible with " \
-                             f"daily flux units of '{daily_spec.flux.unit}")
-        
+                             f"daily flux units of '{daily_spec.flux.unit}'")
+
         # Check wavelength unit compatibility
         if gaussian_std.unit != u.dimensionless_unscaled:
-            raise ValueError("Standard deviation for constructing gaussian kernel must be dimensionless, but " \
-                             f"std was given with units of {gaussian_std.unit}:\nyou may need to divide by the " \
+            raise ValueError("Standard deviation for constructing Gaussian kernel must be dimensionless, but " \
+                             f"std was given with units of {gaussian_std.unit}: you may need to divide by the " \
                              "spectral resolution first.")
 
         # Create lmfit parameters
@@ -947,19 +1024,19 @@ class SolarSpectrum(Spectrum1D):
                                                          daily_spec, 
                                                          gaussian_std, 
                                                          regress=False)
-        
+
         # Update emissions
         emissions = {}
         for key, value in list(sumer.emissions.items()):
             emissions[key] = value['Wavelengths']
         for key, value in list(sumer.emissions.items()):
             emissions[key] = value['Wavelengths']
-        
+
         if len(emissions) != 0:
             output.emissions = emissions
             downsampled_output.emissions = emissions
             dc_output.emissions = emissions
-        
+
         return output, downsampled_output, dc_output, fitted_params
 
 
@@ -973,4 +1050,4 @@ if __name__ == "__main__":
                                                             daily_spec=nnl, 
                                                             gaussian_std = pixel_std,
                                                             fit='polynomial')
-        
+

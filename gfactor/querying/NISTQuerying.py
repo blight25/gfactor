@@ -25,8 +25,14 @@ class NISTRetriever:
     
     def __init__(self):
 
+        """
+        NIST retriever object constructor.
+
+        'elements_by_mass' provides a built-in sorting mechanism for the querying
+        order when performing data extraction.  
+        """
+
         self._base_url = "https://physics.nist.gov/cgi-bin/ASD/lines1.pl?spectra="
-        self.df = None  # Pandas dataframe, filled out by the data_retrieval function
            
         self.elements_by_mass = {
             'H': 1.008, 'He': 4.0026, 'Li': 6.94, 'Be': 9.0122, 'B': 10.81, 'C': 12.011, 
@@ -53,15 +59,22 @@ class NISTRetriever:
 
     @staticmethod
     def __float_func(frac_str):
-        
-        """Removes the extraneous characters from "questionable" levels in a NIST generated Pandas dataframe
+        """
+        Removes the extraneous characters from "questionable" levels in a NIST generated Pandas dataframe
         for the relevant columns and converts half-integer momenta, e.g. 3/2, to decimals (1.5) for use in the g-factor
         script.
 
         Known questionable flags (to date) are: 'a', brackets i.e. '[ ]', '*', and '?'
 
-        @param frac_str: string to be converted to a float
-        @return: float value of frac_str
+        Parameters
+        ----------
+        frac_str : str
+            String to be converted to a float.
+
+        Returns
+        -------
+        float
+            Float value of frac_str.
         """
 
         if type(frac_str) is float or type(frac_str) is np.float64:
@@ -98,12 +111,20 @@ class NISTRetriever:
 
     @staticmethod
     def __acc_swap(val):
-        """Swaps the qualitative accuracies of the oscillator strengths from NIST data for the quantitative values,
+        """
+        Swaps the qualitative accuracies of the oscillator strengths from NIST data for the quantitative values,
         as a percentage of the oscillator strength. Note that for ratings of E the error is typically greater than 50%,
         so here we assign 70%.
 
-        @param val: qualitative oscillator strength accuracy
-        @return: quantitative oscillator strength accuracy
+        Parameters
+        ----------
+        val : str
+            Qualitative oscillator strength accuracy.
+
+        Returns
+        -------
+        acc: float
+            Quantitative oscillator strength accuracy.
         """
 
         acc = 0
@@ -138,7 +159,23 @@ class NISTRetriever:
         return acc
     
 
-    def __url_build(self, atoms, ionized):
+    def __url_build(self, atoms:List[str], ionized:bool):
+
+        """
+        Constructs final URL from components.
+
+        Parameters
+        ----------
+        atoms : List[str]
+            List of atoms to query for.
+        ionized : bool
+            Indicates whether or not ionized transitions are included.
+
+        Returns
+        -------
+        url : str
+            Constructed URL.
+        """
         
         atom_comb = ""
         for atom in atoms:
@@ -156,7 +193,23 @@ class NISTRetriever:
         return url
     
 
-    def __clean(self, df, elements):
+    def __clean(self, df:pd.DataFrame, elements:List[str]):
+
+        """
+        Sequence of operations to tidy up column notation, standardize data types, etc.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Resultant DataFrame from successful query.
+        elements : List[str]
+            Atomic species targeted in the query.
+
+        Returns
+        -------
+        df : pd.DataFrame
+            Cleaned DataFrame.
+        """
         
         # Check dataframe validity
         core_cols = ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k', 'Acc', 'conf_i', 'term_i', 'conf_k', 'term_k']
@@ -184,8 +237,13 @@ class NISTRetriever:
         
         for col in ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k']:
             df[col] = df[col].apply(self.__float_func)
-            
-        df = df.astype({"obs_wl(A)": float, "fik": float, "term_k": str, "Acc": str, "unc_obs_wl":float, "Aki(s^-1)":float})
+        
+        dtype_adjust = {"obs_wl(A)": float, "fik": float, "term_k": str, "Acc": str, "unc_obs_wl":float, "Aki(s^-1)":float}
+        for col in list(dtype_adjust.keys()):
+            if col not in df.columns:
+                del dtype_adjust[col]
+
+        df = df.astype(dtype_adjust)
         df['Acc'] = df['Acc'].apply(self.__acc_swap)
         
         # Add columns for element and species number, if not already present
@@ -196,32 +254,32 @@ class NISTRetriever:
         return df
     
 
-    def retrieve(self, elements: List[str], ionized=False, save_dir=None, overwrite=False) -> pd.DataFrame:
+    def retrieve(self, elements: List[str], ionized=False, save_dir:str=None, overwrite=False) -> pd.DataFrame:
         
         """
-        Function to retrieve data from NIST within the gfactor framework. 
-        
-        @param elements: 
-            atomic species to be considered
+        Retrieve data from NIST Atomic Database.
 
-        @param ionized: 
-            Optional, indicates whether or not ionized transitions will be included
+        Parameters
+        ----------
+        elements : List[str]
+            Atomic species to be queried for.
+        ionized : bool, optional
+            Indicates whether or not ionized transitions will be included.
+        save_dir : str, optional
+            Saves CSV to this directory if provided.
+        overwrite : bool, optional
+            If True (and save_dir is not None), forcibly overwrite existing files.
 
-        @param save_dir: 
-            Optional, saves csv to this directory if provided
-
-        @param overwite: 
-            Optional, if saving results, forcibly overwrite existing files
-
-        @return: df: 
-            results from API request
-        
+        Returns
+        -------
+        df : pd.DataFrame
+            Results from API request.
         """
 
         # Save to an external file
         if save_dir:
 
-            # Make path
+            # Construct os path
             dir = Path(save_dir)
             dir.mkdir(parents=True, exist_ok=True)
             elements_str = " ".join(elements)
@@ -249,12 +307,33 @@ class NISTRetriever:
             
         # Clean, save, return data
         df = self.__clean(df, elements)
-        df.to_csv(save_file)
+
+        if save_dir:
+            df.to_csv(save_file)
 
         return df
     
 
-    def extract(self, save_dir, error_dir, overwrite):
+    def extract(self, save_dir:str, error_dir:str, overwrite=False):
+
+        """
+        Sweeps through 'elements_by_mass' object dictionary, querying all available
+        elements 1-by-1, and saving both non-ionized and ionized transition CSV files to
+        the chosen directory.
+
+        Parameters
+        ----------
+        save_dir : str
+            Save directory for atomic data.
+        error_dir : str
+            Directory to record error logs in.
+        overwrite : bool, optional
+            If True, forcibly overwrite existing files.
+
+        Returns
+        -------
+        None
+        """
 
         # Core directory
         dir = Path(save_dir)
@@ -278,8 +357,11 @@ class NISTRetriever:
         with open (error_file, "w") as problem_file: 
             problem_file.write("PROBLEM ELEMENTS\n\n")
 
+        # Loop through all elements
         for element in elements:
             for cur_dir, ionization in [(standard_dir, False), (ionized_dir, True)]:
+
+                # Retrieval
                 try:
                     self.retrieve(elements=[element], ionized=ionization, 
                                   save_dir=cur_dir, overwrite=overwrite)
@@ -288,16 +370,23 @@ class NISTRetriever:
                         with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
                             problem_file.write(f"\nRequests Error: elements={[element]}," \
                                                f"ionization={ionization}, error = {e}\n\n") # Keep tabs on problematic dates
+                    
+                    # Sometimes the connection needs to be closed to give the server a breather
                     elif isinstance(e, requests.exceptions.RequestException):
-                        time.sleep(5)
+                        time.sleep(5) # Rest period
+
+                        # Attempt same query again
                         try:
                             self.retrieve(elements=[element], ionized=ionization, 
                                           save_dir=cur_dir, overwrite=overwrite)
+                            
+                        # If a second error is encountered, it must be more than just a connectivity issue
                         except requests.exceptions.RequestException as e:
                             with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
                                 problem_file.write(f"\nRequests Error: elements={[element]}," \
                                                f"ionization={ionization}, error = {e}\n\n") # Keep tabs on problematic dates
 
+            # Next element
             progress_bar.update(1)
 
 
