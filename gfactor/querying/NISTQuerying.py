@@ -4,6 +4,7 @@ import argparse
 import io
 import warnings
 from pandas.errors import ParserWarning
+from pandas import StringDtype
 
 from pathlib import Path
 from typing import List
@@ -12,6 +13,7 @@ from tqdm import tqdm
 
 import pandas as pd
 import numpy as np
+import json
 
 class NISTRetriever:
     
@@ -155,7 +157,7 @@ class NISTRetriever:
         elif 'E' in val:
             acc = 0.7
         else:
-            acc = val
+            acc = np.nan
         return acc
     
 
@@ -188,8 +190,8 @@ class NISTRetriever:
         segway = "&limits_type=0&"
         
         # Hardcoded variables
-        everything_else = "unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&conf_out=on&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data"
-        url = self._base_url + atom_comb + segway + everything_else
+        remaining = "unit=0&de=0&I_scale_type=1&format=3&line_out=1&remove_js=on&en_unit=1&output=0&bibrefs=1&page_size=15&show_obs_wl=1&unc_out=1&order_out=0&max_low_enrg=&show_av=2&max_upp_enrg=&tsb_value=0&min_str=&A_out=0&f_out=on&intens_out=on&max_str=&allowed_out=1&forbid_out=1&min_accur=&min_intens=&conf_out=on&term_out=on&enrg_out=on&J_out=on&submit=Retrieve+Data"
+        url = self._base_url + atom_comb + segway + remaining
         return url
     
 
@@ -214,6 +216,7 @@ class NISTRetriever:
         # Check dataframe validity
         core_cols = ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k', 'Acc', 'conf_i', 'term_i', 'conf_k', 'term_k']
         wavelength_cols = ['obs_wl_vac(A)', 'obs_wl_air(A)']
+        drop_cols = ['Unnamed: 0', 'intens', 'Type', 'line_ref', 'Unnamed: 17']
         missing_cores = [col for col in core_cols if col not in df.columns]
         missing_wavelengths = [col for col in wavelength_cols if col not in df.columns]
         
@@ -231,6 +234,11 @@ class NISTRetriever:
         df = df[df["intens"] != "intens"]
         df = df[df["obs_wl(A)"] != "obs_wl_air(A)"]
         df = df[df["obs_wl(A)"] != "obs_wl_vac(A)"]
+
+        # Drop unneeded columns
+        for col in drop_cols:
+            if col in df.columns:
+                df = df.drop(col, axis=1)
         
         # Adjust data type and content
         df['J_k'] = df['J_k'].apply(np.nan_to_num)
@@ -238,15 +246,31 @@ class NISTRetriever:
         for col in ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k']:
             df[col] = df[col].apply(self.__float_func)
         
-        dtype_adjust = {"obs_wl(A)": float, "fik": float, "term_k": str, "Acc": str, "unc_obs_wl":float, "Aki(s^-1)":float}
-        for col in list(dtype_adjust.keys()):
-            if col not in df.columns:
-                del dtype_adjust[col]
-
-        df = df.astype(dtype_adjust)
-        df['Acc'] = df['Acc'].apply(self.__acc_swap)
+        dtype_adjust = {"obs_wl(A)": float, 
+                        "unc_obs_wl":float,
+                        "Aki(s^-1)":float,
+                        'Acc': str, 
+                        "sp_num": int, 
+                        "conf_k": str, 
+                        "term_k": str,
+                        "conf_i": str, 
+                        "term_i": str}
         
-        # Add columns for element and species number, if not already present
+        if "unc_obs_wl" not in df.columns:
+            del dtype_adjust["unc_obs_wl"]
+        if "sp_num" not in df.columns:
+            del dtype_adjust["sp_num"]
+
+        for col, dtype in list(dtype_adjust.items()):
+            if dtype == str:
+                df[col] = df[col].fillna("").astype(StringDtype())
+            else:
+                df[col] = df[col].astype(float)
+
+        df['Acc'] = df['Acc'].apply(self.__acc_swap)
+        df['Acc'] = df['Acc'].astype(float)
+        
+        # For whatever reason, hydrogen isn't included if queried individually
         if 'element' not in df.columns:
             df['element'] = elements[0]
             df['sp_num'] = 1
@@ -353,9 +377,9 @@ class NISTRetriever:
         # Setup file for recording problem dates and queried dates
         error_dir = Path(error_dir)
         error_dir.mkdir(parents=True, exist_ok=True)
-        error_file = error_dir / "problem_elements.txt"
-        with open (error_file, "w") as problem_file: 
-            problem_file.write("PROBLEM ELEMENTS\n\n")
+        error_file = error_dir / "problem_elements.json"
+        error_data = []  # Initialize a list to store error information
+        error_els = set()
 
         # Loop through all elements
         for element in elements:
@@ -363,32 +387,47 @@ class NISTRetriever:
 
                 # Retrieval
                 try:
-                    self.retrieve(elements=[element], ionized=ionization, 
+                    df = self.retrieve(elements=[element], ionized=ionization, 
                                   save_dir=cur_dir, overwrite=overwrite)
+                    
+                    # Request processes, but no data available
+                    if df is None:
+                        error_data.append({"Element": element, "Ionized": ionization, "Request Error": False, "Value Error": False})
+                        error_els.add(element)
+
                 except Exception as e:
                     if isinstance(e, ValueError):
-                        with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                            problem_file.write(f"\nRequests Error: elements={[element]}," \
-                                               f"ionization={ionization}, error = {e}\n\n") # Keep tabs on problematic dates
+                        error_data.append({"Element": element, "Ionized": ionization, "Request Error": False, "Value Error": True})
+                        error_els.add(element)
                     
                     # Sometimes the connection needs to be closed to give the server a breather
                     elif isinstance(e, requests.exceptions.RequestException):
-                        time.sleep(5) # Rest period
+                        time.sleep(5)  # Rest period
 
                         # Attempt same query again
                         try:
-                            self.retrieve(elements=[element], ionized=ionization, 
+                            df = self.retrieve(elements=[element], ionized=ionization, 
                                           save_dir=cur_dir, overwrite=overwrite)
                             
+                            # Request processes, but no data available
+                            if df is None:
+                                error_data.append({"Element": element, "Ionized": ionization, "Request Error": False, "Value Error": False})
+                                error_els.add(element)
+
                         # If a second error is encountered, it must be more than just a connectivity issue
-                        except requests.exceptions.RequestException as e:
-                            with open ("./gfactor/querying/problem_elements.txt", "a") as problem_file:
-                                problem_file.write(f"\nRequests Error: elements={[element]}," \
-                                               f"ionization={ionization}, error = {e}\n\n") # Keep tabs on problematic dates
+                        except requests.exceptions.RequestException:
+                            error_data.append({"Element": element, "Ionized": ionization, "Request Error": True, "Value Error": False})
+                            error_els.add(element)
 
             # Next element
             progress_bar.update(1)
 
+        # Write error data to JSON file
+        with open(error_file, "w") as problem_file:
+            json.dump(error_data, problem_file, indent=4)
+        
+        print(error_els)
+        
 
 def parse_args():
         p = argparse.ArgumentParser("Extract Atomic Species Data from NIST Atomic Spectral Database")
@@ -396,7 +435,7 @@ def parse_args():
                     help="Save directory for elemental csv files")
         p.add_argument("--error-dir", '-ed', type=str, default="./data/errors",
                        help="Logs errors with specific queries, if any")
-        p.add_argument("--overwrite", "-o", type=bool, default=False,
+        p.add_argument("--overwrite", "-o", type=bool, default=True,
                        help="Forcibly ovewrite existing files if true")
         
         return p.parse_args()

@@ -15,6 +15,8 @@ from gfactor import LISIRDRetriever, NISTRetriever
 from gfactor.main.gfactorsolar import SolarSpectrum
 from gfactor.main.gfactoratomic import AtomicData
 
+from matplotlib import pyplot as plt
+
 
 # Filter warnings
 warnings.filterwarnings('ignore', category=RuntimeWarning)
@@ -137,7 +139,8 @@ class gfactor:
         return prob
     
 
-    def __get_gfactors(self, nist_table: pd.DataFrame, spectrum: SolarSpectrum, T: float, hel_v: float, hel_d: float):
+    def __get_gfactors(self, nist_table: pd.DataFrame, spectrum: SolarSpectrum, T: float, hel_v: float, hel_d: float, 
+                       debug_bounds=None):
         """
         Calculates gfactors for the given atomic transition data, solar spectrum, 
         temperature, and heliocentric conditions.
@@ -181,19 +184,40 @@ class gfactor:
             bandpass = spectrum.spectral_axis[(spectrum.spectral_axis > (line_shift-D_lambda)) \
                                             & (spectrum.spectral_axis < (line_shift+D_lambda))]
             solar_flux = np.interp(bandpass, spectrum.spectral_axis, spectrum.flux) * (1*u.AU / hel_d)**2
+            singular_flux = np.max(solar_flux)
+            singular_wavelength = bandpass[np.argmax(solar_flux)]
             constants_a_sum = constants['Aki_other'].sum()
 
             try:
                 gf = constants['Aki(s^-1)'] / constants_a_sum * gfactor.Quantum_const.to(u.AA) * line_shift ** 2 * \
-                constants['fik'] * np.pi * np.mean(solar_flux) * prob
+                constants['fik'] * np.pi * singular_flux * prob
             except ZeroDivisionError:
                 raise ZeroDivisionError(f"Looks like one of these got set to zero:\n{line}, {constants['Aki(s^-1)']}, "
                                         f"{sum(constants['Aki_other'])}, {constants['fik']}, {solar_flux}")
+            
+            if debug_bounds is not None:
+                line_shift_AA = line_shift.to(u.AA)
+                if (line_shift_AA.value > debug_bounds[0]) & (line_shift_AA.value < debug_bounds[1]):
+                    fig, ax = plt.subplots()
+                    feature_waves = spectrum.spectral_axis[(spectrum.spectral_axis >= debug_bounds[0]*u.AA) &
+                                                           (spectrum.spectral_axis <= debug_bounds[1]*u.AA)]
+                    feature_flux = spectrum.flux[(spectrum.spectral_axis >= debug_bounds[0]*u.AA) &
+                                                 (spectrum.spectral_axis <= debug_bounds[1]*u.AA)]
+                    ax.plot(feature_waves, feature_flux, label="Spectrum")
+                    ax.vlines(x=line.value, label="Line", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="mediumseagreen", linestyles="dashed")
+                    ax.vlines(x=line_shift_AA.value, label="Line Shift", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="orange", linestyles="dashed")
+                    ax.vlines(x=singular_wavelength.value, label="Singular Wavelength", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="purple", linestyles="dashed")
+                    ax.legend()
+                    plt.savefig(f"./gfactor/main/debug.png")
+
             self._lines.append(line)
             self._g_factors.append(gf)
+
+            
             
 
-    def gfactors(self, elements: List[str], wavelength_bounds=[800, 6000], date="2019-12-19", T=300, hel_d=1, hel_v=5) -> pd.DataFrame:
+    def gfactors(self, elements: List[str], wavelength_bounds=[800, 6000], date="2019-12-19", T=300, 
+                 hel_d=1, hel_v=5, debug_bounds=None) -> pd.DataFrame:
         """
         Calculates gfactors for a given set of atomic species and heliocentric conditions.
 
@@ -219,10 +243,10 @@ class gfactor:
         # ****************************************** DATA RETRIEVAL ********************************************
 
         # 1. Fetch NIST data
-        nist_table = AtomicData.load_nist(wavelength_bounds=wavelength_bounds, elements=elements)
+        nist_table = AtomicData.load_nist(elements=elements)
 
         # 2. Fetch daily spectrum data
-        high_res_daily, low_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL")
+        low_res_daily, high_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL")
 
         # 4. Load SUMER data
         sumer = SolarSpectrum.sumer_spectrum()
@@ -230,9 +254,8 @@ class gfactor:
         # ************************************** SPECTRUM CONSTRUCTION ********************************************
         
         # 1. Build convolution kernel (1305 OI line basis)
-        height, mean, std, pixel_std = high_res_daily.feature_fit(fit_func=SolarSpectrum._gaussian_func, 
-                                                             height=1e-5, mean=1302.5, std=.4,
-                                                             feature = [1301, 1303.5])
+        height, mean, std, pixel_std = high_res_daily.feature_fit(height=1e-5, mean=1302.5, std=.4,
+                                                                  feature = [1301, 1303.5])
 
         # 2. Scale SUMER data to match NRL data
         sumer_scaled, _, _, _ = SolarSpectrum.daily_fit(poly_degree=5,
@@ -258,11 +281,15 @@ class gfactor:
         hel_v = hel_v.to(unit=u.cm / u.s)
             
         # Calculate g-factors
-        self.__get_gfactors(nist_table, spectrum, T*u.K, hel_v, hel_d*u.AU)
+        self.__get_gfactors(nist_table, spectrum, T*u.K, hel_v, hel_d*u.AU, debug_bounds=debug_bounds)
 
         # Generate g-factor DataFrame
         gf_dataframe = pd.DataFrame(list(zip(self._ion_id, self._lines, self._g_factors)),
                                          columns=['Ion ID', 'Wavelength (Angstroms)', 'g-factor (phts s^-1)'])
+        
+        # Filter down by wavelength
+        gf_dataframe = gf_dataframe.loc[(gf_dataframe['Wavelength (Angstroms)'] >= wavelength_bounds[0]*u.AA) &
+                                         (gf_dataframe['Wavelength (Angstroms)'] <= wavelength_bounds[1]*u.AA)]
         self._gf_dataframe = gf_dataframe
         return gf_dataframe
     
@@ -271,5 +298,6 @@ class gfactor:
 if __name__ == "__main__":
     
     x = gfactor()
-    gf_dataframe = x.gfactors(elements=['H', 'O'], date="2018-11-16", wavelength_bounds=(800, 6000), T=300, hel_d=1.0, hel_v=-62.7) 
+    gf_dataframe = x.gfactors(elements=['H', 'O'], date="2009-03-01", wavelength_bounds=(800, 6000), 
+                              T=300, hel_d=.352, hel_v=0, debug_bounds=[1301, 1303]) 
     print("test")

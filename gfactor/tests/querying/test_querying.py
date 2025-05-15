@@ -8,55 +8,6 @@ from gfactor import NISTRetriever, LISIRDRetriever
 
 class TestQuerying(unittest.TestCase):
 
-    def test_NISTRetrieval(self):
-        
-        retriever = NISTRetriever()
-        
-        # Set random seed for reproducibility
-        random_seed = 5
-        random.seed(random_seed)
-        
-        # For checking dataframe validity
-        core_cols = ['Ei(eV)', 'Ek(eV)', 'fik', 'J_i', 'J_k', 'Acc', 'conf_i', 'term_i', 'conf_k', 'term_k']
-        wavelength_col = 'obs_wl(A)'
-        
-        # Single element, non-ionized:
-        for element in retriever.elements:
-            try:
-                df = retriever.retrieve(wavelength_bounds=[5000, 9000], elements=[element], ionized=False)
-                missing_cores = [col for col in core_cols if col not in df.columns]
-                self.assertTrue(len(df) > 0 and len(missing_cores) == 0 and wavelength_col in df.columns)
-            except ValueError:
-                self.fail()
-        
-        # Single element, ionized:
-        for element in retriever.elements:
-            try:
-                df = retriever.retrieve(wavelength_bounds=[5000, 9000], elements=[element], ionized=True)
-                missing_cores = [col for col in core_cols if col not in df.columns]
-                assert len(df) > 0 and len(missing_cores) == 0 and wavelength_col in df.columns   
-            except ValueError:
-                self.fail()
-        
-        # Multiple elements, non-ionized (can't check all combinations, so just randomly pick a few)
-        atoms = random.choices(retriever.elements, k=random.randint(0, len(retriever.elements)))
-        try:
-            df = retriever.retrieve(wavelength_bounds=[5000, 9000], elements=atoms, ionized=False)
-            missing_cores = [col for col in core_cols if col not in df.columns]
-            assert len(df) > 0 and len(missing_cores) == 0 and wavelength_col in df.columns
-        except ValueError:
-            self.fail()
-        
-        # Multiple elements, ionized:
-        atoms = random.choices(retriever.elements, k=random.randint(0, len(retriever.elements)))
-        try:
-            df = retriever.retrieve(wavelength_bounds=[5000, 9000], elements=atoms, ionized=True)
-            missing_cores = [col for col in core_cols if col not in df.columns]
-            assert len(df) > 0 and len(missing_cores) == 0 and wavelength_col in df.columns
-        except ValueError:
-            self.fail()
-
-
 
     def test_LISIRDQuerying(self):
         

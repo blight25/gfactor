@@ -254,11 +254,12 @@ class SolarSpectrum(Spectrum1D):
         3. {TIMED: https://lasp.colorado.edu/lisird/data/timed_see_ssi_l3}
 
         For spectra with both high and low resolution designations, both versions will be loaded
-        and returned as tuple of SolarSpectrum objects (high-res, low-res): can always
-        check '.name' attribute to confirm which is which. Note that the chosen date may not always 
+        and returned as tuple of SolarSpectrum objects (low-res, high-res): you can always
+        check the '.name' attribute to confirm which is which. Note that the chosen date may not always 
         be valid for both subsets - in this case, the unavailable subset will be set to None.
 
-        Otherwise, the first tuple value will be a SolarSpectrum, and the second will be None.
+        If there are no such designations, then the first tuple value will be a SolarSpectrum, 
+        and the second will be None.
 
         Parameters
         ----------
@@ -275,7 +276,7 @@ class SolarSpectrum(Spectrum1D):
         Returns
         -------
         specs : Tuple[Optional[SolarSpectrum], Optional[SolarSpectrum]]
-            High-resolution and low-resolution Solar Spectrum objects (subject to the caveats
+            Low-resolution and high-resolution Solar Spectrum objects (subject to the caveats
             listed above).
         """
         dataset = dataset.upper()
@@ -293,7 +294,7 @@ class SolarSpectrum(Spectrum1D):
         specs = []
         for subset in subsets[dataset]:
 
-            file = daily_dir / date / subset + ".pickle" # Filename
+            file = daily_dir / date / subset / ".pickle" # Filename
 
             # Read internally
             if file.exists():
@@ -562,7 +563,7 @@ class SolarSpectrum(Spectrum1D):
             if spec_left.uncertainty and spec_right.uncertainty:
                 combined_uncertainty = np.concatenate(spec_left.uncertainty[spec_left.spectral_axis <= stitch_wave], spec_right.uncertainty[spec_right.spectral_axis > stitch_wave])
             else:
-                combined_uncertainty = np.concatenate(spec_left.uncertainty[spec_left.spectral_axis <= stitch_wave], np.array([None]*len(spec_right.spectral_axis) - 1))
+                combined_uncertainty = None
 
 
         # Preserve spec_right
@@ -606,7 +607,7 @@ class SolarSpectrum(Spectrum1D):
             if spec_left.uncertainty and spec_right.uncertainty:
                 combined_uncertainty = np.concatenate((spec_left.uncertainty[spec_left.spectral_axis < stitch_wave], spec_right.uncertainty[spec_right.spectral_axis >= stitch_wave]))
             else:
-                combined_uncertainty = np.concatenate(np.array([None]*len(spec_left.spectral_axis) - 1), spec_right.uncertainty[spec_right.spectral_axis >= stitch_wave])
+                combined_uncertainty = None
         
         # Combine and carry over emission values, if any
         emissions = {}
@@ -749,6 +750,7 @@ class SolarSpectrum(Spectrum1D):
     """ --------------------------------------------------- FEATURE FITTING -------------------------------------------------- """
 
 
+    @staticmethod
     def _gaussian_func(params, feature_waves, feature_flux):
         """
         Gaussian fit function for feature fitting with the lmfit package.
@@ -767,9 +769,8 @@ class SolarSpectrum(Spectrum1D):
         residuals : np.ndarray
             The residuals between the model and the feature flux.
         """
-    
         vals = params.valuesdict()
-        model = vals['height']*np.exp(-.5*np.square((feature_waves.value - vals['mean']) / vals['std']))
+        model = vals['height'] * np.exp(-0.5 * np.square((feature_waves.value - vals['mean']) / vals['std']))
         return model - feature_flux.value
 
 
@@ -832,7 +833,7 @@ class SolarSpectrum(Spectrum1D):
 
     """ --------------------------------------------------- SPECTRUM FITTING -------------------------------------------------- """
 
-
+    @staticmethod
     def _poly_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress: bool = False):
         """
         Polynomial fit function for spectrum fitting (SUMER to daily spectra) using lmfit.
@@ -889,6 +890,7 @@ class SolarSpectrum(Spectrum1D):
             return output, downsampled_output, dc_output
 
 
+    @staticmethod
     def _legendre_func(params, sumer:'SolarSpectrum', daily_spec:'SolarSpectrum', gaussian_std, regress: bool = False):
         """
         Legendre fit function for spectrum fitting (SUMER to daily spectra) using lmfit.
@@ -951,6 +953,7 @@ class SolarSpectrum(Spectrum1D):
             return output, downsampled_output, dc_output
 
 
+    @staticmethod
     def daily_fit(sumer: 'SolarSpectrum', daily_spec: 'SolarSpectrum', gaussian_std: Quantity,
                   poly_degree: int = 6, fit: str = "polynomial"):
 
