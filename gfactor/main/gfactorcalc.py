@@ -2,12 +2,12 @@
 
 # Default libraries
 import warnings
-from typing import List
+from typing import List, Tuple
 
 # Third-party libraries
 import pandas as pd
 import numpy as np
-from astropy.units import cds
+from astropy.units import Quantity, cds
 from astropy import units as u
 
 # Local libraries
@@ -25,10 +25,10 @@ class gfactor:
 
     # UNITS
     c_cm = cds.c.cgs # speed of light in cm/s
-    Quantum_const = 2.8179398e-13*u.cm 
+    Quantum_const = 2.8179398e-13*u.cm
     k = 8.61733326e-5*u.eV / u.K  # Boltzmann constant eV/K
     h = 6.62606957e-27*u.erg*u.s
-
+    
 
     def __init__(self):
 
@@ -67,7 +67,7 @@ class gfactor:
     
 
     @staticmethod
-    def __extract_state_data(nist_table, row_idx, line):
+    def __extract_state_data(nist_table:pd.DataFrame, row_idx:int, line:Quantity, wavelength_bounds:Tuple[float]):
         """
         Extracts atomic data from NIST Dataframe for the current emission line and state.
 
@@ -78,6 +78,8 @@ class gfactor:
             Row index to extract from the NIST table.
         line : Quantity
             Emission wavelength in Angstroms.
+        wavelength_bounds: Tuple
+            Emission wavelength bounds as (lower bound, upper bound) in Angstroms.
 
         Returns:
         dict
@@ -112,6 +114,7 @@ class gfactor:
         constants = {'Aki(s^-1)': a_val, 'Ei(eV)': E, 'Ek(eV)': E_k, 'J_i': jpp_val,
                      'J_i_other': jpp, 'Ei_other': ei, 'fik': f_row, 'Aki_other': constants_a,
                      'element': row['element'], 'sp_num': row['sp_num']}
+        
         return constants
     
 
@@ -140,7 +143,7 @@ class gfactor:
     
 
     def __get_gfactors(self, nist_table: pd.DataFrame, spectrum: SolarSpectrum, T: float, hel_v: float, hel_d: float, 
-                       debug_bounds=None):
+                       wavelength_bounds:Tuple[float], debug_bounds=None):
         """
         Calculates gfactors for the given atomic transition data, solar spectrum, 
         temperature, and heliocentric conditions.
@@ -156,6 +159,8 @@ class gfactor:
             Heliocentric velocity in cm/s.
         hel_d : float
             Heliocentric distance in AU.
+        wavelength_bounds: Tuple
+            Emission wavelength bounds as (lower bound, upper bound) in Angstroms.
 
         Returns:
         None
@@ -171,7 +176,7 @@ class gfactor:
                 raise ValueError('no comparable solar data for this bandpass: ' + str(nist_table['obs_wl(A)'].iloc[i]))   
 
             # Constants and transition probabilities
-            constants = self.__extract_state_data(nist_table, i, line)
+            constants = self.__extract_state_data(nist_table, i, line, wavelength_bounds)
             prob = self.__get_state_prob(constants, T)
 
             #Determine 99% velocity max assuming Boltzmann distribution of molecules (this is the most robust/physically correct)
@@ -206,7 +211,7 @@ class gfactor:
                     ax.plot(feature_waves, feature_flux, label="Spectrum")
                     ax.vlines(x=line.value, label="Line", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="mediumseagreen", linestyles="dashed")
                     ax.vlines(x=line_shift_AA.value, label="Line Shift", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="orange", linestyles="dashed")
-                    ax.vlines(x=singular_wavelength.value, label="Singular Wavelength", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="purple", linestyles="dashed")
+                    ax.vlines(x=singular_wavelength.value, label="Max", ymin=min(feature_flux.value), ymax=max(feature_flux.value), colors="purple", linestyles="dashed")
                     ax.legend()
                     plt.savefig(f"./gfactor/main/debug.png")
 
@@ -244,6 +249,9 @@ class gfactor:
 
         # 1. Fetch NIST data
         nist_table = AtomicData.load_nist(elements=elements)
+        nist_table = nist_table[(wavelength_bounds[0]*u.AA <= nist_table['obs_wl(A)']) 
+                                & (nist_table['obs_wl(A)'] <= wavelength_bounds[1]*u.AA)]
+
 
         # 2. Fetch daily spectrum data
         low_res_daily, high_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL")
@@ -281,15 +289,13 @@ class gfactor:
         hel_v = hel_v.to(unit=u.cm / u.s)
             
         # Calculate g-factors
-        self.__get_gfactors(nist_table, spectrum, T*u.K, hel_v, hel_d*u.AU, debug_bounds=debug_bounds)
+        self.__get_gfactors(nist_table, spectrum, T*u.K, hel_v, hel_d*u.AU,
+                            wavelength_bounds=wavelength_bounds, debug_bounds=debug_bounds)
 
         # Generate g-factor DataFrame
         gf_dataframe = pd.DataFrame(list(zip(self._ion_id, self._lines, self._g_factors)),
                                          columns=['Ion ID', 'Wavelength (Angstroms)', 'g-factor (phts s^-1)'])
-        
-        # Filter down by wavelength
-        gf_dataframe = gf_dataframe.loc[(gf_dataframe['Wavelength (Angstroms)'] >= wavelength_bounds[0]*u.AA) &
-                                         (gf_dataframe['Wavelength (Angstroms)'] <= wavelength_bounds[1]*u.AA)]
+
         self._gf_dataframe = gf_dataframe
         return gf_dataframe
     
@@ -298,6 +304,6 @@ class gfactor:
 if __name__ == "__main__":
     
     x = gfactor()
-    gf_dataframe = x.gfactors(elements=['H', 'O'], date="2009-03-01", wavelength_bounds=(800, 6000), 
-                              T=300, hel_d=.352, hel_v=0, debug_bounds=[1301, 1303]) 
+    gf_dataframe = x.gfactors(elements=['O'], date="2009-04-16", wavelength_bounds=(800, 6000), 
+                              T=300, hel_d=.352, hel_v=0, debug_bounds=[1301, 1307]) 
     print("test")

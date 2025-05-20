@@ -1,14 +1,14 @@
+from gfactor.querying.LISIRDQuerying import LISIRDRetriever
+
 import numpy as np
 import pandas as pd
-
+import string
+from typing import List, Dict
 from pathlib import Path
 
 from specutils.manipulation.resample import FluxConservingResampler
 from specutils import Spectrum1D
 
-from gfactor.querying.LISIRDQuerying import LISIRDRetriever
-
-from astropy.nddata import VarianceUncertainty, InverseVariance, NDUncertainty
 from astropy.units import Quantity
 from astropy.convolution import convolve, Gaussian1DKernel
 import astropy.units as u
@@ -16,10 +16,6 @@ import astropy.units as u
 from scipy.special import legendre
 
 from lmfit import Parameters, minimize
-
-import string
-
-from typing import List, Dict, Tuple
 
 
 class SolarSpectrum(Spectrum1D):

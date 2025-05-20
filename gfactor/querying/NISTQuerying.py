@@ -250,7 +250,7 @@ class NISTRetriever:
                         "unc_obs_wl":float,
                         "Aki(s^-1)":float,
                         'Acc': str, 
-                        "sp_num": int, 
+                        "sp_num": float, 
                         "conf_k": str, 
                         "term_k": str,
                         "conf_i": str, 
@@ -273,7 +273,7 @@ class NISTRetriever:
         # For whatever reason, hydrogen isn't included if queried individually
         if 'element' not in df.columns:
             df['element'] = elements[0]
-            df['sp_num'] = 1
+            df['sp_num'] = 1.0
 
         return df
     

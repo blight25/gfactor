@@ -26,7 +26,7 @@ class TestAtomic(unittest.TestCase):
                               "Acc" : float, 
                               "Aki(s^-1)" : float, 
                               "element" : str, 
-                              "sp_num": int}
+                              "sp_num": float}
         
         self.optional_cols = {"unc_obs_wl": float}
         
@@ -89,7 +89,7 @@ class TestAtomic(unittest.TestCase):
                                 self.fail(f"data type of {dtype} for '{col}' does not match expected data type of {self.required_cols[col]}")
         
         # Passed
-        self.AssertTrue(True)
+        self.assertTrue(True)
 
 
     def test_load(self):

@@ -26,38 +26,31 @@ class TestSolar(unittest.TestCase):
     def test_load_sumer(self):
         try:
             sumer = SolarSpectrum.sumer_spectrum()
-            assert isinstance(sumer, SolarSpectrum)
+            self.assertIsInstance(sumer, SolarSpectrum)
         except ValueError:
             self.fail()
 
     def test_load_daily(self):
-        try:
-            nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high")
-            assert isinstance(nnl, SolarSpectrum)
-        except ValueError:
-            self.fail()
+        nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high")
+        self.assertIsInstance(nnl, SolarSpectrum)
 
 
     def test_spectral_overlap(self):
-        try:
-            sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
-            nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high")
-            sumer_overlap, nnl_overlap = SolarSpectrum.spectral_overlap(sumer, nnl)
-            assert (np.abs(sumer_overlap.spectral_axis[0] - nnl_overlap.spectral_axis[0]) < 1*u.Angstrom) & (np.abs(sumer_overlap.spectral_axis[-1] - nnl_overlap.spectral_axis[-1]) < 1*u.Angstrom)
-        except ValueError:
-            self.fail()
+        sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
+        nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high")
+        sumer_overlap, nnl_overlap = SolarSpectrum.spectral_overlap(sumer, nnl)
+        clipped_left = (np.abs(sumer_overlap.spectral_axis[0] - nnl_overlap.spectral_axis[0]) < 1*u.Angstrom)
+        clipped_right = (np.abs(sumer_overlap.spectral_axis[-1] - nnl_overlap.spectral_axis[-1]) < 1*u.Angstrom)
+        self.assertTrue(clipped_left & clipped_right)
 
 
     def test_static_resample(self):
-        try:
-            sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
-            nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high", emissions={"Source: I made it up": [1212, 1220],
-                                                                                                        "Lyman-alpha":[1214-1218]})
-            sumer_overlap, nnl_overlap = SolarSpectrum.spectral_overlap(sumer, nnl)
-            resampled_sumer = SolarSpectrum.resample(sumer_overlap, new_axis = nnl_overlap.spectral_axis)
-            self.assertEqual(len(resampled_sumer.spectral_axis), len(nnl_overlap.spectral_axis))
-        except ValueError:
-            self.fail()
+        sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
+        nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high", emissions={"Test": [1212, 1220],
+                                                                                                    "Lyman-alpha":[1214-1218]})
+        sumer_overlap, nnl_overlap = SolarSpectrum.spectral_overlap(sumer, nnl)
+        resampled_sumer = SolarSpectrum.resample(sumer_overlap, new_axis = nnl_overlap.spectral_axis)
+        self.assertEqual(len(resampled_sumer.spectral_axis), len(nnl_overlap.spectral_axis))
 
     def test_resample(self):
         try:
