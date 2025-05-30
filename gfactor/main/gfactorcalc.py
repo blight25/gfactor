@@ -304,6 +304,6 @@ class gfactor:
 if __name__ == "__main__":
     
     x = gfactor()
-    gf_dataframe = x.gfactors(elements=['O'], date="2009-04-16", wavelength_bounds=(800, 6000), 
+    gf_dataframe = x.gfactors(elements=['O'], date="2009-04-16", wavelength_bounds=(800, 1600), 
                               T=300, hel_d=.352, hel_v=0, debug_bounds=[1301, 1307]) 
     print("test")

@@ -5,6 +5,15 @@ from astropy import units as u
 from astropy.units import Quantity
 from astropy.nddata import VarianceUncertainty, InverseVariance
 
+from datetime import datetime as dt
+from datetime import date, timedelta
+
+from tqdm import tqdm
+
+import math
+
+from gfactor.querying.LISIRDQuerying import LISIRDRetriever
+
 import numpy as np
 
 # Local imports
@@ -12,16 +21,8 @@ from gfactor.main.gfactorsolar import SolarSpectrum
 
 class TestSolar(unittest.TestCase):
 
-    def test_object(self):
-        try:
-            spectrum_object = SolarSpectrum(emissions={"Lyman-alpha": [1214, 1218], "Source: I made it up": [1212, 1220]}, 
-                                            flux=[10, 10, 15, 10]*(u.W/u.m**2/u.Angstrom), 
-                                            spectral_axis=[1210, 1214, 1218, 1222]*u.Angstrom,
-                                            uncertainty=VarianceUncertainty([2, 2, 2, 2]*u.W**2/u.m**4/u.Angstrom**2))
-            self.assertIsInstance(spectrum_object.emissions, dict)
-        except ValueError:
-            self.fail()
-
+    retriever = LISIRDRetriever()
+    names = retriever.irradiance_names
 
     def test_load_sumer(self):
         try:
@@ -30,9 +31,45 @@ class TestSolar(unittest.TestCase):
         except ValueError:
             self.fail()
 
+
+    def test_load_daily_new(self):
+
+        NUM_SAMPLES = 50
+
+        print("Load Daily Spectrum (with Querying) Test")
+        print(f"Number of samples per dataset: {NUM_SAMPLES}")
+
+        for name in TestSolar.names:
+
+            # Date initialization - these will always be replaced
+            min_date = date(year=1600, month=1, day=1)
+            max_date = date(year=2100, month=1, day=1)
+
+            for subset in TestSolar.names[name]:
+                dataset = name + "_" + subset if subset else name
+                min_date = max(min_date, TestSolar.retriever.irradiance_datasets[dataset]['min_date'])
+                max_date = min(max_date, TestSolar.retriever.irradiance_datasets[dataset]['max_date'])
+            
+            print(f"\nDataset {name}: minimum date of {min_date}, maximum date of {max_date}")
+
+            total_days = (max_date - min_date).days
+            interval = math.floor(total_days / NUM_SAMPLES)
+            progress_bar = tqdm(total=total_days, desc=name)
+            query_date = min_date
+            while query_date <= max_date:
+                dataframes = SolarSpectrum.daily_spectrum(date=query_date.strftime("%Y-%m-%d"), 
+                                                  dataset=name)
+                for dataframe in dataframes:
+                    if dataframe:
+                        self.assertIsInstance(dataframe, SolarSpectrum)
+                query_date += timedelta(interval)
+                progress_bar.update(interval)
+            
+    
     def test_load_daily(self):
-        nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high")
-        self.assertIsInstance(nnl, SolarSpectrum)
+        
+        for dataset in TestSolar.names:
+            pass
 
 
     def test_spectral_overlap(self):

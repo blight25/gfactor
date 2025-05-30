@@ -29,7 +29,7 @@ class SolarSpectrum(Spectrum1D):
         """
     
     daily_retriever = LISIRDRetriever()
-    daily_spectra = ["TIMED", "SORCE", "NNL"]
+    daily_spectra = list(daily_retriever.irradiance_names.keys())
     resampler = FluxConservingResampler()
 
 
@@ -235,7 +235,7 @@ class SolarSpectrum(Spectrum1D):
     @staticmethod
     def daily_spectrum(date:str, dataset:str="NNL",
                        emissions:Dict[str, List[float]]=None,
-                       daily_dir:str="./data/spectra"):
+                       daily_dir:str=None):
         
         """ Loads in SolarSpectrum object(s) specified by a given dataset and date. Currently 
         available datasets are as follows (see descriptions from UC Boulder's 
@@ -283,17 +283,17 @@ class SolarSpectrum(Spectrum1D):
                              f"are {SolarSpectrum.daily_spectra}.")
         
         # Path object
-        daily_dir = Path(daily_dir + "/" + dataset)
+        daily_dir = Path(daily_dir + "/" + dataset) if daily_dir else None
 
         # Dataset subsets
-        subsets = SolarSpectrum.daily_retriever.dataset_names() # Get subsets
+        subsets = SolarSpectrum.daily_retriever.irradiance_names # Get subsets
         specs = []
         for subset in subsets[dataset]:
-
-            file = daily_dir / date / subset / ".pickle" # Filename
+            
+            file = daily_dir / date / subset / ".pickle" if daily_dir else None # Filename
 
             # Read internally
-            if file.exists():
+            if file and file.exists():
                 data = pd.read_pickle(file)
             # Query 
             else:

@@ -141,28 +141,52 @@ class LISIRDRetriever():
       
         self.__base_url = "https://lasp.colorado.edu/lisird/latis/dap/"
 
-        self.datasets = {"TIMED": {"name": "timed_see_ssi_l3", "min_date": date(2002, 2, 8), "max_date": date(2023, 8, 30)},
+        self.irradiance_datasets = {"TIMED": {"name": "timed_see_ssi_l3", "min_date": date(2002, 2, 8), "max_date": date(2023, 8, 30)},
                         "SORCE_low_res": {"name": "sorce_ssi_l3", "min_date": date(2003, 2, 25), "max_date": date(2020, 2, 25)},
                         "SORCE_high_res": {"name": "sorce_solstice_ssi_high_res", "min_date": date(2003, 3, 5), "max_date": date(2020, 2, 25)},
-                        "GOES_18": {"name": "noaa_goes18_euvs_1d", "min_date": date(2022, 9, 9), "max_date": date(2025, 1, 27)},
                         "NNL_low_res": {"name": "nnl_ssi_P1D", "min_date": date(1874, 5, 9), "max_date": date(2023, 12, 31)},
                         "NNL_high_res": {"name": "nnl_hires_ssi_P1D", "min_date": date(1874, 5, 9), "max_date": date(2023, 12, 31)}
                         }
+        
+        self.other_datasets = {"GOES_18": {"name": "noaa_goes18_euvs_1d", "min_date": date(2022, 9, 9), "max_date": date(2025, 1, 27)}}
     
 
-    def dataset_names(self) -> Dict[str, List[str]]:
-
+    @property
+    def irradiance_names(self) -> Dict[str, List[str]]:
         """
-        Maps dataset names to their respective subsets.
+        Maps names of SSI (Solar Spectral Irradiance) datasets to their respective subsets.
 
         Returns:
         dict
-            Dictionary mapping dataset names to lists of subsets. If no subsets exist, maps to [None].
+            Dictionary mapping dataset names to subset lists [subset 1, subset 2, etc.]. If no subsets exist, maps to [None].
         """
-
         # Dataset Identification
         names = {}
-        for key in list(self.datasets.keys()):
+        for key in list(self.irradiance_datasets.keys()):
+            parts = key.split('_', 1)
+            if parts[0] in names: # Already seen, must have subsets ('low_res', 'high_res', etc.)
+                names[parts[0]].append(parts[1])
+            else:
+                if len(parts) == 2: # Has a subset
+                    names[parts[0]] = [parts[1]]
+                else:
+                    names[parts[0]] = [None] # No subset
+        
+        return names
+
+
+    @property
+    def other_names(self) -> Dict[str, List[str]]:
+        """
+        Maps names of alternative datasets (TSI, bandpass measurements, etc.) to their respective subsets.
+
+        Returns:
+        dict
+            Dictionary mapping dataset names to subset lists [subset 1, subset 2, etc.]. If no subsets exist, maps to [None].
+        """
+        # Dataset Identification
+        names = {}
+        for key in list(self.other_datasets.keys()):
             parts = key.split('_', 1)
             if parts[0] in names: # Already seen, must have subsets ('low_res', 'high_res', etc.)
                 names[parts[0]].append(parts[1])
@@ -195,29 +219,38 @@ class LISIRDRetriever():
         """
         
         # Dataset Identification
-        names = self.dataset_names()
         dataset = dataset.upper()
+
+        names = {**self.irradiance_names, **self.other_datasets}
         
-        if dataset not in names:
-            raise ValueError(f"Dataset {dataset} not recognized. Available datasets are: {list(names.keys())}")
+        if dataset in self.irradiance_names:
+            datasets = self.irradiance_datasets
+        
+        elif dataset in self.other_names:
+            datasets = self.other_datasets
+        
+        else:
+            raise ValueError(f"Dataset '{dataset}' not recognized." 
+                             f"\nAvailable irradiance (SSI) datasets are: {list(self.irradiance_names.keys())}."
+                             f"\nAvailable alternate datasets (TSI, bandpass, etc.) are: {list(self.other_names.keys())}.")
 
         subsets = names[dataset] # Any type of sub-designation for the dataset, e.g. [low_res, high_res]
         if subset:
             if not subsets[0]:
-                print(f"Dataset {dataset} has no subsets - retrieval still procedes at top level")
+                print(f"Dataset '{dataset}' has no subsets - retrieval still procedes at top level")
                 subset = None
             elif subset not in subsets:
-                raise ValueError(f"subset {subset} not recognized for dataset {dataset}. Available subsets are {subsets}")
+                raise ValueError(f"subset '{subset}' not recognized for dataset '{dataset}'. Available subsets are {subsets}.")
         else:
             subset = names[dataset][-1] # Pick most recent subset
         dataset = dataset + "_" + subset if subset else dataset
         
-        ds = self.datasets[dataset]["name"]
+        ds = datasets[dataset]["name"]
         
         # Date selection
         if date is None:
             raise ValueError(f"""Query date is required. Time range for the selected dataset '{dataset}' is:
-                             {self.datasets[dataset]['min_date']} through {self.datasets[dataset]['max_date']}.""")
+                             {datasets[dataset]['min_date']} through {datasets[dataset]['max_date']}.""")
      
         init_date = dt.strptime(date, "%Y-%m-%d").date()
         
@@ -227,8 +260,8 @@ class LISIRDRetriever():
         slctn.append("time<" + upper_bound.strftime("%Y-%m-%d"))
         
         # Keep track of upper and lower date bounds
-        min_date = self.datasets[dataset]["min_date"]
-        max_date = self.datasets[dataset]["max_date"]
+        min_date = datasets[dataset]["min_date"]
+        max_date = datasets[dataset]["max_date"]
         
         # Ensure target date is within the bounds
         if init_date < min_date or init_date > max_date:
@@ -321,23 +354,32 @@ class LISIRDRetriever():
         None
         """
         # Dataset Identification
-        names = self.dataset_names()
         dataset = dataset.upper()
+
+        names = {**self.irradiance_names, **self.other_datasets}
         
-        if dataset not in names:
-            raise ValueError(f"Dataset {dataset} not recognized. Available datasets are: {list(names.keys())}")
+        if dataset in self.irradiance_names:
+            datasets = self.irradiance_datasets
+        
+        elif dataset in self.other_names:
+            datasets = self.other_datasets
+        
+        else:
+            raise ValueError(f"Dataset '{dataset}' not recognized." 
+                             f"\nAvailable irradiance (SSI) datasets are: {list(self.irradiance_names.keys())}."
+                             f"\nAvailable alternate datasets (TSI, bandpass, etc.) are: {list(self.other_names.keys())}.")
 
         subsets = names[dataset] # Any type of sub-designation for the dataset, e.g. [low_res, high_res]
         if subset:
             if not subsets[0]:
-                print(f"Dataset {dataset} has no subsets - querying will procede as usual")
+                print(f"Dataset '{dataset}' has no subsets - querying will procede as usual")
                 subset = None
             elif subset not in subsets:
-                raise ValueError(f"subset {subset} not recognized for dataset {dataset}. Available subsets are {subsets}")
+                raise ValueError(f"subset '{subset}' not recognized for dataset '{dataset}'. Available subsets are {subsets}.")
             else:
-                print(f" ------------- Beginning query of {dataset}, subset: {subset} --------------")
+                print(f"\n------------- Beginning query of {dataset}, subset: {subset} --------------\n")
         else:
-            print(f" ------------- Beginning query of {dataset}, subsets: {names[dataset]} --------------")
+            print(f"\n------------- Beginning query of {dataset}, subsets: {names[dataset]} --------------\n")
     
         # Create save directory
         save_dir = Path(save_dir + "/" + dataset)
@@ -365,12 +407,12 @@ class LISIRDRetriever():
         if not subset:
             for sub in names[dataset]:
                 full_name = dataset + '_' + sub if sub else dataset
-                default_start_date = max(default_start_date, self.datasets[full_name]["min_date"])
-                default_end_date = min(default_end_date, self.datasets[full_name]["max_date"])
+                default_start_date = max(default_start_date, datasets[full_name]["min_date"])
+                default_end_date = min(default_end_date, datasets[full_name]["max_date"])
         else:
             full_name = dataset + '_' + subset
-            default_start_date = max(default_start_date, self.datasets[full_name]["min_date"])
-            default_end_date = min(default_end_date, self.datasets[full_name]["max_date"])
+            default_start_date = max(default_start_date, datasets[full_name]["min_date"])
+            default_end_date = min(default_end_date, datasets[full_name]["max_date"])
         
         # User start and end dates - check validity
         if start_date is not None:
@@ -390,6 +432,10 @@ class LISIRDRetriever():
             end_date = test_date
         else:
             end_date = default_end_date
+        
+        print(f"\nStart date of {start_date.strftime("%Y-%m-%d")}")
+        print(f"End date of {end_date.strftime("%Y-%m-%d")}")
+        print(f"Step size of {interval} day(s)\n")
 
         # Query variable initialization
         query_date = start_date
@@ -498,15 +544,17 @@ def parse_args():
 def main():
     args = parse_args()
     retriever = LISIRDRetriever()
-    retriever.extract(dataset=args.dataset,
-                      subset=args.subset,
-                      start_date=args.start_date,
-                      end_date=args.end_date,
-                      interval=args.interval,
-                      save_dir=args.save_dir,
-                      log_dir=args.log_dir,
-                      error_dir=args.error_dir,
-                      overwrite=args.overwrite)
+    df = retriever.retrieve(dataset="SORCE", subset="low_res", date="2013-01-10")
+    print(df)
+    # retriever.extract(dataset=args.dataset,
+    #                   subset=args.subset,
+    #                   start_date=args.start_date,
+    #                   end_date=args.end_date,
+    #                   interval=args.interval,
+    #                   save_dir=args.save_dir,
+    #                   log_dir=args.log_dir,
+    #                   error_dir=args.error_dir,
+    #                   overwrite=args.overwrite)
 
 
 if __name__ == "__main__":
