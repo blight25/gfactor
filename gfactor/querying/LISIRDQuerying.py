@@ -94,7 +94,7 @@ class LISIRDRetriever():
         return params
     
     
-    def __query(self, ds: str, prjn: List[str] = None, slctn: List[str] = None, optn: List[str] = None) -> pd.DataFrame:
+    def __query(self, ds: str, prjn: List[str] = None, slctn: List[str] = None, optn: List[str] = None, timeout=10) -> pd.DataFrame:
         """
         Retrieves specific data from LISIRD using the LATIS framework.
 
@@ -108,6 +108,8 @@ class LISIRDRetriever():
             Variable constraints, e.g., ["irradiance>1360"].
         optn : list of str, optional
             Operations to apply, e.g., ["replace_missing(NaN)"].
+        timeout : int or float, optional
+            Timeout in seconds for the network request. Default is 10.
 
         Returns
         -------
@@ -119,9 +121,10 @@ class LISIRDRetriever():
         init_url = self.__url_build(ds)
         params = self.__param_build(prjn, slctn, optn)
         url = init_url + "?" + params
-        
-        # Retrieve data
-        response = requests.get(url)
+        try:
+            response = requests.get(url, timeout=timeout)
+        except requests.exceptions.Timeout as e:
+            raise requests.exceptions.Timeout(f"Request to {url} timed out after {timeout} seconds.") from e
         if not response:
             print(response.text)
             return None
@@ -211,7 +214,7 @@ class LISIRDRetriever():
         return identifiers
     
 
-    def retrieve(self, dataset:str, query_date:str, subset:str = None, max_queries:int = 10) -> pd.DataFrame:
+    def retrieve(self, dataset:str, query_date:str, subset:str = None, timeout=10, max_queries:int = 10) -> pd.DataFrame:
         """
         Queries a dataset and returns a DataFrame of irradiance and uncertainty at each wavelength and time.
 
@@ -223,6 +226,8 @@ class LISIRDRetriever():
             Date to query in 'YYYY-MM-DD' format. Required.
         subset : str, optional
             Subset of the dataset to query. Defaults to the most recent subset.
+        timeout : int or float, optional
+            Timeout in seconds for the network request. Default is 10.
         max_queries : int, optional
             Maximum number of queries before raising an error. Default is 10.
 
@@ -308,7 +313,10 @@ class LISIRDRetriever():
         # Query loop
         while cur_query < max_queries:
             
-            df = self.__query(ds=ds, slctn=slctn)
+            try:
+                df = self.__query(ds=ds, slctn=slctn, timeout=timeout)
+            except requests.exceptions.Timeout as e:
+                raise RuntimeError(f"Timeout occurred while querying dataset '{dataset}' on {cur_date.strftime('%Y-%m-%d')}: {e}") from e
             
             # Check for successful query
             if len(df.values > 0):
@@ -359,7 +367,7 @@ class LISIRDRetriever():
     
 
     def extract(self, dataset: str = "NNL", subset: str = None, start_date: str = None, end_date: str = None, 
-                interval: int = 1, save_dir: str = "./data/spectra", overwrite: bool = False):
+                interval: int = 1, save_dir: str = "./data/spectra", overwrite: bool = False, timeout=10):
         """
         Extracts spectral data for a given dataset and saves it locally.
 
@@ -375,8 +383,12 @@ class LISIRDRetriever():
             End date for querying in 'YYYY-MM-DD' format. Defaults to dataset's maximum date.
         interval : int, optional
             Interval in days for querying. Default is 1.
+        save_dir : str, optional
+            Directory to save results. Default is './data/spectra'.
         overwrite : bool, optional
             Whether to overwrite existing files. Default is False.
+        timeout : int or float, optional
+            Timeout in seconds for the network request. Default is 10.
 
         Returns
         -------
@@ -463,7 +475,7 @@ class LISIRDRetriever():
             if not isinstance(start_date, str):
                 raise TypeError(f"Expected type 'str' for 'start_date', got {type(start_date)}. Note that the time range for the" 
                                 f" selected dataset '{dataset}'"
-                                f"is: {datasets[dataset]['min_date']} through {datasets[dataset]['max_date']}.")
+                                f"is: {default_start_date} through {default_end_date}.")
             
             test_date = dt.strptime(start_date, "%Y-%m-%d").date()
             
@@ -480,7 +492,7 @@ class LISIRDRetriever():
             if not isinstance(end_date, str):
                 raise TypeError(f"Expected type 'str' for 'end_date', got {type(end_date)}. Note that the time range for the" 
                                     f" selected dataset '{dataset}'"
-                                    f"is: {datasets[dataset]['min_date']} through {datasets[dataset]['max_date']}.")
+                                    f"is: {default_start_date} through {default_end_date}.")
             
             test_date = dt.strptime(end_date, "%Y-%m-%d").date()
             
@@ -530,38 +542,43 @@ class LISIRDRetriever():
                 if not subset:
                     for sub in identifiers[dataset]:
                         data[sub] = self.retrieve(dataset=dataset, subset=sub, 
-                                                     query_date=query_date.strftime("%Y-%m-%d"), max_queries=1)
+                                                     query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
                 else:
-                    data[subset] = self.retrieve(dataset=dataset, subset=subset, query_date=query_date.strftime("%Y-%m-%d"), max_queries=1)
-            
+                    data[subset] = self.retrieve(dataset=dataset, subset=subset, query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
+            except requests.exceptions.Timeout as e:
+                with open (error_file, "a") as problem_file:
+                    problem_file.write(f"Timeout Error: {query_date}, {e}\n\n")
+                query_date += timedelta(interval)
+                progress_bar.update(1)
+                continue
             except requests.exceptions.RequestException: # sometimes SSL behaves weird, or the connection gets closed suddenly/times out: try one more time
-                
                 time.sleep(10) # First, give server some time to breath
-                
-                # Query again
                 try:
                     data = {}
                     if not subset:
                         for sub in identifiers[dataset]:
                             data[sub] = self.retrieve(dataset=dataset, subset=sub, 
-                                                        query_date=query_date.strftime("%Y-%m-%d"), max_queries=1)
+                                                        query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
                     else:
-                        data[subset] = self.retrieve(dataset=dataset, subset=subset, query_date=query_date.strftime("%Y-%m-%d"), max_queries=1)
-                
+                        data[subset] = self.retrieve(dataset=dataset, subset=subset, query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
+                except requests.exceptions.Timeout as e:
+                    with open (error_file, "a") as problem_file:
+                        problem_file.write(f"Timeout Error: {query_date}, {e}\n\n")
+                    query_date += timedelta(interval)
+                    progress_bar.update(1)
+                    continue
                 except requests.exceptions.RequestException as e: # Back-to-back failures isn't a coincidence
                     with open (error_file, "a") as problem_file:
                         problem_file.write(f"Requests Error: {query_date}, {e}\n\n") # Keep tabs on problematic dates
                     query_date += timedelta(interval)
                     progress_bar.update(1)
                     continue
-            
             except NoDataAvailableError: # There was no data available, or else something (that isn't an SSL or connection issue) didn't go right
                 with open (error_file, "a") as problem_file:
                     problem_file.write(f"Value Error: {query_date}\n\n") # Keep tabs on problematic dates
                 query_date += timedelta(interval)
                 progress_bar.update(1)
                 continue
-            
             # Save dataframes
             for sub in list(data.keys()):
                 filename = dataset + "_" + sub if sub else dataset
@@ -599,7 +616,7 @@ def parse_args():
 def main():
     args = parse_args()
     retriever = LISIRDRetriever()
-    df = retriever.retrieve(dataset="SORCE", subset="low_res", query_date="2013-01-10")
+    df = retriever.retrieve(dataset="goes", subset="18", query_date="2022-10-10")
     print(df)
     # retriever.extract(dataset=args.dataset,
     #                   subset=args.subset,
