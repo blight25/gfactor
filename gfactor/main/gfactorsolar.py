@@ -29,7 +29,7 @@ class SolarSpectrum(Spectrum1D):
         """
     
     daily_retriever = LISIRDRetriever()
-    daily_spectra = list(daily_retriever.irradiance_names.keys())
+    daily_spectra = list(daily_retriever.irradiance_identifiers.keys())
     resampler = FluxConservingResampler()
 
 
@@ -286,7 +286,7 @@ class SolarSpectrum(Spectrum1D):
         daily_dir = Path(daily_dir + "/" + dataset) if daily_dir else None
 
         # Dataset subsets
-        subsets = SolarSpectrum.daily_retriever.irradiance_names # Get subsets
+        subsets = SolarSpectrum.daily_retriever.irradiance_identifiers # Get subsets
         specs = []
         for subset in subsets[dataset]:
             

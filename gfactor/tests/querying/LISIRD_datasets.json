@@ -1,0 +1,36 @@
+{
+  "TIMED": {
+    "status": "timeout",
+    "bad dates": [],
+    "timeout": 10
+  },
+  "SORCE": {
+    "low_res": {
+      "status": "timeout",
+      "bad dates": [],
+      "timeout": 10
+    },
+    "high_res": {
+      "status": "working",
+      "bad dates": [
+        "2013-11-21"
+      ]
+    }
+  },
+  "NNL": {
+    "low_res": {
+      "status": "working",
+      "bad dates": []
+    },
+    "high_res": {
+      "status": "working",
+      "bad dates": []
+    }
+  },
+  "GOES": {
+    "18": {
+      "status": "working",
+      "bad dates": []
+    }
+  }
+}
