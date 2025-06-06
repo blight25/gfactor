@@ -13,6 +13,8 @@ from tqdm import tqdm
 import math
 import time
 
+import json
+
 from typing import List, Dict
 
 
@@ -138,7 +140,9 @@ class LISIRDRetriever():
         """
         LISIRDRetriever object constructor.
 
-        Initializes the base URL and dataset metadata for querying.
+        Initializes the base URL and dataset metadata for querying. 
+        
+        For an overview of available datasets, subsets, and date ranges, simply call 'print' on a LISIRDRetriever object.
 
         Attributes
         ----------
@@ -160,6 +164,41 @@ class LISIRDRetriever():
                         }
         
         self.other_datasets = {"GOES_18": {"name": "noaa_goes18_euvs_1d", "min_date": date(2022, 9, 9), "max_date": date(2025, 1, 27)}}
+    
+
+    def __str__(self):
+        info = ["\n-------------- Available Datasets & Subsets ------------\n"]
+        info.append("----- Irradiance (SSI) -----\n")
+        for k, v in self.irradiance_identifiers.items():
+            if v[-1] is None:
+                # No subsets
+                min_date = self.irradiance_datasets[k]["min_date"].strftime("%Y-%m-%d")
+                max_date = self.irradiance_datasets[k]["max_date"].strftime("%Y-%m-%d")
+                info.append(f"  {k}\n    {min_date} through {max_date}\n")
+            else:
+                info.append(f"  {k}")
+                for subset in v:
+                    ds_key = k + "_" + subset
+                    min_date = self.irradiance_datasets[ds_key]["min_date"].strftime("%Y-%m-%d")
+                    max_date = self.irradiance_datasets[ds_key]["max_date"].strftime("%Y-%m-%d")
+                    info.append(f"    {subset}: {min_date} through {max_date}")
+                info.append(" ")
+        info.append("----- Other datasets (TSI, bandpass, etc.) -----\n")
+        for k, v in self.other_identifiers.items():
+            if v[-1] is None:
+                min_date = self.other_datasets[k]["min_date"].strftime("%Y-%m-%d")
+                max_date = self.other_datasets[k]["max_date"].strftime("%Y-%m-%d")
+                info.append(f"  {k}\n   {min_date} through {max_date}\n")
+            else:
+                info.append(f"  {k}")
+                for subset in v:
+                    ds_key = k + "_" + subset
+                    min_date = self.other_datasets[ds_key]["min_date"].strftime("%Y-%m-%d")
+                    max_date = self.other_datasets[ds_key]["max_date"].strftime("%Y-%m-%d")
+                    info.append(f"    {subset}: {min_date} through {max_date}")
+                info.append(" ")
+        info.append(" ")
+        return "\n".join(info)
     
 
     @property
@@ -214,7 +253,7 @@ class LISIRDRetriever():
         return identifiers
     
 
-    def retrieve(self, dataset:str, query_date:str, subset:str = None, timeout=10, max_queries:int = 10) -> pd.DataFrame:
+    def retrieve(self, dataset:str, query_date:str, subset:str = None, timeout=10) -> pd.DataFrame:
         """
         Queries a dataset and returns a DataFrame of irradiance and uncertainty at each wavelength and time.
 
@@ -228,8 +267,6 @@ class LISIRDRetriever():
             Subset of the dataset to query. Defaults to the most recent subset.
         timeout : int or float, optional
             Timeout in seconds for the network request. Default is 10.
-        max_queries : int, optional
-            Maximum number of queries before raising an error. Default is 10.
 
         Returns
         -------
@@ -262,26 +299,18 @@ class LISIRDRetriever():
             
             if not isinstance(subset, str):
                 raise TypeError(f"Expected type 'str' for 'subset', got type '{type(subset)}' instead."
-                                "\nSee 'irradiance_identifers' or 'other_identifiers' properties for more detail on subsets.")
+                                f"\nAvailable subsets are {subsets}.")
             
             if not subsets[-1]:
-                print(f"Dataset '{dataset}' has no subsets - retrieval procedes at top level")
-                subset = None
+                raise ValueError(f"'{dataset}' has no subsets, but a specific subset was specified. Please set 'subset=None' if you wish to query this dataset.")
             
             elif subset not in subsets:
                 raise ValueError(f"subset '{subset}' not recognized for dataset '{dataset}'. Available subsets are {subsets}.")
         
-        else:
-            
-            subset = subsets[-1] # Pick most recent subset
-            if not subset:
-                print(f"Dataset '{dataset}' has no subsets - retrieval procedes at top level")
-
-            else:
-                print(f"No subset provided for dataset '{dataset}' - defaulting to '{subset}'")
+        elif subsets[-1] is not None:
+            raise ValueError(f"dataset '{dataset}' consists of subsets {subsets}, but 'subsets' was set to None. Please specify which ")
 
         dataset = dataset + "_" + subset if subset else dataset
-        
         ds = datasets[dataset]["name"]
         
         # Date selection
@@ -289,11 +318,11 @@ class LISIRDRetriever():
             raise TypeError(f"Expected type 'str' for 'date', got {type(query_date)}. Note that the time range for the selected dataset '{dataset}'"
                              f" is: {datasets[dataset]['min_date']} through {datasets[dataset]['max_date']}.")
         
-        init_date = dt.strptime(query_date, "%Y-%m-%d").date()
+        query_date = dt.strptime(query_date, "%Y-%m-%d").date()
         
         # Add date selection to query
-        slctn = ["time>=" + init_date.strftime("%Y-%m-%d")]
-        upper_bound = init_date + timedelta(days=1)
+        slctn = ["time>=" + query_date.strftime("%Y-%m-%d")]
+        upper_bound = query_date + timedelta(days=1)
         slctn.append("time<" + upper_bound.strftime("%Y-%m-%d"))
         
         # Keep track of upper and lower date bounds
@@ -301,65 +330,27 @@ class LISIRDRetriever():
         max_date = datasets[dataset]["max_date"]
         
         # Ensure target date is within the bounds
-        if init_date < min_date or init_date > max_date:
+        if query_date < min_date or query_date > max_date:
             raise ValueError("Chosen date is out of bounds: must fall between " + min_date.strftime("%Y-%m-%d") +
                              " and " + max_date.strftime("%Y-%m-%d"))
         
-        # Search variables
-        cur_date = init_date
-        cur_query = 0
-        upwards = True # If query is unsuccessful, search at more recent dates
+        try:
+            df = self.__query(ds=ds, slctn=slctn, timeout=timeout)
+        except requests.exceptions.Timeout as e:
+            raise RuntimeError(f"Timeout occurred while querying dataset '{dataset}' on {query_date.strftime('%Y-%m-%d')}: you can check data availability from LISIRD directly"
+                               "\nat https://lasp.colorado.edu/lisird/. In some cases, data may appear to be available on LISIRD, but is no longer accessible through the API.") from e
+            
+        # Check for successful query
+        if not len(df.values > 0):
+            raise NoDataAvailableError(f"No data available fo dataset {dataset} on date '{query_date.strftime('%Y-%m-%d')}': you can check data availability from LISIRD directly"
+                                       "\nat https://lasp.colorado.edu/lisird/. In some cases, data may appear to be available on LISIRD, but is no longer accessible through the API.")
         
-        # Query loop
-        while cur_query < max_queries:
-            
-            try:
-                df = self.__query(ds=ds, slctn=slctn, timeout=timeout)
-            except requests.exceptions.Timeout as e:
-                raise RuntimeError(f"Timeout occurred while querying dataset '{dataset}' on {cur_date.strftime('%Y-%m-%d')}: {e}") from e
-            
-            # Check for successful query
-            if len(df.values > 0):
-                break
-            
-            # Incrementing date, looking for new data
-            if upwards:
-                new_date = upper_bound
-                upper_bound = upper_bound + timedelta(days=1)
-                
-                # Max date reached without any results, search at older dates instead
-                if upper_bound >= max_date:
-                    new_date = init_date - timedelta(days=1)
-                    upper_bound = init_date
-                    upwards = False
-                        
-            # Decrementing date, looking for old data
-            else:
-                new_date = cur_date - timedelta(days=1)
-                upper_bound = cur_date
-                
-                # No more data to query
-                if new_date <= min_date:
-                    raise NoDataAvailableError("Querying unsuccessful within the known date range: you can check data availability from LISIRD directly"
-                                     "\nat https://lasp.colorado.edu/lisird/")
-            
-            # Update query parameters
-            slctn[0] = "time>=" + new_date.strftime("%Y-%m-%d")
-            slctn[1] = "time<" + upper_bound.strftime("%Y-%m-%d")
-            cur_date = new_date
-            cur_query += 1
-        
-        # Check if max number of queries was made without a valid result
-        if cur_query == max_queries:
-            raise NoDataAvailableError("Max queries reached without success: you can check data availably from LISIRD directly"
-                                       "\nat https://lasp.colorado.edu/lisird/")
-
         # Successful query - modify columns
         else:
             for col in df.columns:
                 if "time" in col:
                     df.drop(col, axis=1, inplace=True)
-                    df["date (YYYY-MM-DD)"] = [cur_date]*len(df)
+                    df["date (YYYY-MM-DD)"] = [query_date]*len(df)
             
             df["Dataset"] = dataset
                     
@@ -367,7 +358,7 @@ class LISIRDRetriever():
     
 
     def extract(self, dataset: str = "NNL", subset: str = None, start_date: str = None, end_date: str = None, 
-                interval: int = 1, save_dir: str = "./data/spectra", overwrite: bool = False, timeout=10):
+                timeout=10, interval: int = 1, save_dir: str = "../data/spectra", overwrite: bool = False):
         """
         Extracts spectral data for a given dataset and saves it locally.
 
@@ -384,7 +375,7 @@ class LISIRDRetriever():
         interval : int, optional
             Interval in days for querying. Default is 1.
         save_dir : str, optional
-            Directory to save results. Default is './data/spectra'.
+            Directory to save results. Default is '../data/spectra'.
         overwrite : bool, optional
             Whether to overwrite existing files. Default is False.
         timeout : int or float, optional
@@ -398,11 +389,10 @@ class LISIRDRetriever():
          # Dataset Identification
         if not isinstance(dataset, str):
             raise TypeError(f"Expected type 'str' for 'dataset', got type '{type(dataset)}' instead." 
-                                    f"\nAvailable irradiance (SSI) datasets are: {list(self.irradiance_identifiers.keys())}."
-                                    f"\nAvailable alternate datasets (TSI, bandpass, etc.) are: {list(self.other_identifiers.keys())}.")
+                            f"\nAvailable irradiance (SSI) datasets are: {list(self.irradiance_identifiers.keys())}."
+                            f"\nAvailable alternate datasets (TSI, bandpass, etc.) are: {list(self.other_identifiers.keys())}.")
         
         dataset = dataset.upper()
-
         identifiers = {**self.irradiance_identifiers, **self.other_identifiers}
         
         if dataset in self.irradiance_identifiers:
@@ -418,44 +408,57 @@ class LISIRDRetriever():
 
         subsets = identifiers[dataset] # Any type of sub-designation for the dataset, e.g. [low_res, high_res]
 
+        # Create save directory
+        dataset_dir = Path(save_dir + "/" + dataset)
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        print(f"\nResults to be saved in directory {dataset_dir}")
+
+        # Create json file for logging
+        save_dir = Path(save_dir)
+        log_dir = save_dir / "extraction_log.json"
+        if Path(log_dir).exists():
+            with open(log_dir, "r") as f:
+                status_log = json.load(f)
+        else:
+            status_log = {}
+        
+        # Dictionary nesting for json file
+        if subsets[-1] is not None:
+            if overwrite or dataset not in status_log:
+                status_log[dataset] = {}
+                for subset in subsets:
+                    status_log[dataset][subset] = {"last_date_queried":None, "bad_dates": [], "status":"working"}
+        else:
+            if overwrite or dataset not in status_log:
+                status_log[dataset] = {}
+                for subset in subsets:
+                    status_log[dataset] = {"last_date_queried":None, "bad_dates": [], "status":"working"}
+    
+        with open(log_dir, "w") as f:
+                json.dump(status_log, f, indent=2)
+        
+        # Check user-specified subset validity
         if subset is not None:
             
             if not isinstance(subset, str):
                 raise TypeError(f"Expected type 'str' for 'subset', got type '{type(subset)}' instead."
-                                "\nSee 'irradiance_identifers' or 'other_identifiers' properties for more detail on available subsets.")
+                                "\nCall 'print' on a LISIRDretriever object to view all available datasets, subsets, and date ranges.")
             
             if not subsets[-1]:
-                print(f"Dataset '{dataset}' has no subsets - extraction procedes at top level")
-                subset = None
+                raise ValueError(f"'{dataset}' has no subsets, but a specific subset was specified. Please set 'subset=None' if you wish to query this dataset.")
             
             elif subset not in subsets:
                 raise ValueError(f"subset '{subset}' not recognized for dataset '{dataset}'. Available subsets are {subsets}.")
             
             else:
                 print(f"\n------------- Beginning query of {dataset}, subset: {subset} --------------\n")
+            subs = [subset]
         
         else:
             print(f"\n------------- Beginning query of {dataset}, subsets: {identifiers[dataset]} --------------\n")
-    
-        # Create save directory
-        save_dir = Path(save_dir + "/" + dataset)
-        save_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Results to be saved in directory {save_dir}")
-
-        # Create log file
-        log_dir = save_dir / "logs" / dataset
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "query_date.txt"
-        print(f"Query log to be saved in directory {save_dir}")
-
-        # Create error file for recording problematic dates
-        error_dir = save_dir / "errors" / dataset
-        error_dir.mkdir(parents=True, exist_ok=True)
-        error_file = error_dir / "problem_dates.txt"
-        with open (error_file, "w") as problem_file: 
-            problem_file.write("PROBLEM DATES\n\n")
-        print(f"Error log to be saved in directory {error_dir}")
-
+            subs = identifiers[dataset]
+        
+        
         # Min and max dates - for subset extraction, will be bounded by strictest time window
         default_start_date = date(1000, 1, 1)
         default_end_date = date(3000, 1, 1)
@@ -469,7 +472,7 @@ class LISIRDRetriever():
             default_start_date = max(default_start_date, datasets[full_name]["min_date"])
             default_end_date = min(default_end_date, datasets[full_name]["max_date"])
         
-        # User start and end dates - check validity
+        # Check user start and end date validity
         if start_date is not None:
             # Typing
             if not isinstance(start_date, str):
@@ -514,17 +517,17 @@ class LISIRDRetriever():
         progress_bar = tqdm(total=total_days, desc="Querying")
         progress_bar.update((start_date - default_start_date).days) # Indicate progress relative to min date
         
-        # Loop
+        # Query loop
         while query_date <= end_date:
 
             # Subdirectory
-            cur_dir = Path(save_dir / query_date.strftime("%Y-%m-%d"))
+            cur_dir = Path(dataset_dir / query_date.strftime("%Y-%m-%d"))
 
             # Unless command is given to overwrite, continue if directory exists
             if cur_dir.exists() and not overwrite:
                 
                 # Write current date to file
-                with open(log_file, "w") as query_file:
+                with open(log_dir, "w") as query_file:
                     query_file.write(query_date.strftime('%Y-%m-%d'))
 
                 # Update progress bar
@@ -536,57 +539,58 @@ class LISIRDRetriever():
             # Otherwise, make the directory
             cur_dir.mkdir(parents=True, exist_ok=True)
             
-            # Query
-            try:
-                data = {}
-                if not subset:
-                    for sub in identifiers[dataset]:
-                        data[sub] = self.retrieve(dataset=dataset, subset=sub, 
-                                                     query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
-                else:
-                    data[subset] = self.retrieve(dataset=dataset, subset=subset, query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
-            except requests.exceptions.Timeout as e:
-                with open (error_file, "a") as problem_file:
-                    problem_file.write(f"Timeout Error: {query_date}, {e}\n\n")
-                query_date += timedelta(interval)
-                progress_bar.update(1)
-                continue
-            except requests.exceptions.RequestException: # sometimes SSL behaves weird, or the connection gets closed suddenly/times out: try one more time
-                time.sleep(10) # First, give server some time to breath
+            # Subset loop
+            data = {}
+            for sub in subs:
                 try:
-                    data = {}
-                    if not subset:
-                        for sub in identifiers[dataset]:
-                            data[sub] = self.retrieve(dataset=dataset, subset=sub, 
-                                                        query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
+                    data[sub] = self.retrieve(dataset=dataset, subset=sub, 
+                                                query_date=query_date.strftime("%Y-%m-%d"), timeout=timeout)
+                    if sub is not None:
+                        status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                     else:
-                        data[subset] = self.retrieve(dataset=dataset, subset=subset, query_date=query_date.strftime("%Y-%m-%d"), max_queries=1, timeout=timeout)
-                except requests.exceptions.Timeout as e:
-                    with open (error_file, "a") as problem_file:
-                        problem_file.write(f"Timeout Error: {query_date}, {e}\n\n")
+                        status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                    with open (log_dir, "w") as f:
+                        json.dump(status_log, f, indent=2)
+                except (requests.exceptions.Timeout, NoDataAvailableError) as e:  # Single indicate dataset is offline
+                    if sub is not None:
+                        status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
+                        status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                    else:
+                        status_log[dataset]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
+                        status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                    with open (log_dir, "w") as f:
+                        json.dump(status_log, f, indent=2)
                     query_date += timedelta(interval)
                     progress_bar.update(1)
                     continue
-                except requests.exceptions.RequestException as e: # Back-to-back failures isn't a coincidence
-                    with open (error_file, "a") as problem_file:
-                        problem_file.write(f"Requests Error: {query_date}, {e}\n\n") # Keep tabs on problematic dates
-                    query_date += timedelta(interval)
-                    progress_bar.update(1)
-                    continue
-            except NoDataAvailableError: # There was no data available, or else something (that isn't an SSL or connection issue) didn't go right
-                with open (error_file, "a") as problem_file:
-                    problem_file.write(f"Value Error: {query_date}\n\n") # Keep tabs on problematic dates
-                query_date += timedelta(interval)
-                progress_bar.update(1)
-                continue
+                except requests.exceptions.RequestException: # sometimes SSL closes connections which have been open for too long: try one more time
+                    time.sleep(10) # First, give server some time to breath
+                    try: # Try one more time
+                        data[sub] = self.retrieve(dataset=dataset, subset=sub, 
+                                                    query_date=query_date.strftime("%Y-%m-%d"), timeout=timeout)
+                        if sub is not None:
+                            status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                        else:
+                            status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                        with open (log_dir, "w") as f:
+                            json.dump(status_log, f, indent=2)
+                    except (requests.exceptions.Timeout, requests.exceptions.RequestException, NoDataAvailableError) as e: # Back-to-back failures isn't a coincidence
+                        if sub is not None:
+                            status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
+                            status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                        else:
+                            status_log[dataset]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
+                            status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
+                        with open (log_dir, "w") as f:
+                            json.dump(status_log, f, indent=2)
+                        query_date += timedelta(interval)
+                        progress_bar.update(1)
+                        continue
+
             # Save dataframes
             for sub in list(data.keys()):
                 filename = dataset + "_" + sub if sub else dataset
                 pd.to_pickle(data[sub], cur_dir / f"{filename}.pickle")
-            
-            # Write current date to file
-            with open(log_file, "w") as query_file:
-                query_file.write(query_date.strftime('%Y-%m-%d'))
         
             # Update progress bar
             query_date += timedelta(interval)
@@ -599,12 +603,14 @@ def parse_args():
                        help="LISIRD dataset to query from")
         p.add_argument("--subset", '-sub', type=str, default=None,
                        help="Queries every subset (e.g. high-res and low-res) for a given dataset")
-        p.add_argument("--interval", "-i", type=int, default=1,
+        p.add_argument("--interval", "-i", type=int, default=365,
                        help="Queries every ith date from min to max")
         p.add_argument("--start-date", '-start', type=str, default=None,
                        help="Start date for querying, in 'YYYY-MM-DD' format")
         p.add_argument("--end-date", "-end", type=str, default=None,
                        help="End date for querying, in 'YYYY-MM-DD' format")
+        p.add_argument("--timeout", "-t", type=int, default=10,
+                       help="Time (in seconds) allowed for request to process before forcing timeout")
         p.add_argument("--save-dir", '-save', type=str, default="./data/spectra",
                     help="Save directory for spectral pickle files")
         p.add_argument("--overwrite", "-o", type=bool, default=False,
@@ -616,16 +622,14 @@ def parse_args():
 def main():
     args = parse_args()
     retriever = LISIRDRetriever()
-    df = retriever.retrieve(dataset="goes", subset="18", query_date="2022-10-10")
-    print(df)
-    # retriever.extract(dataset=args.dataset,
-    #                   subset=args.subset,
-    #                   start_date=args.start_date,
-    #                   end_date=args.end_date,
-    #                   interval=args.interval,
-    #                   save_dir=args.save_dir,
-    #                   overwrite=args.overwrite)
-
+    retriever.extract(dataset=args.dataset,
+                      subset=args.subset,
+                      start_date=args.start_date,
+                      end_date=args.end_date,
+                      timeout=args.timeout,
+                      interval=args.interval,
+                      save_dir=args.save_dir,
+                      overwrite=args.overwrite)
 
 if __name__ == "__main__":
     main()

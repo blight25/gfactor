@@ -1,6 +1,5 @@
 # Standard library
 import unittest
-import concurrent.futures
 import json
 
 from gfactor.querying.LISIRDQuerying import LISIRDRetriever, NoDataAvailableError
@@ -14,9 +13,6 @@ import math
 import numpy as np
 import pandas as pd
 
-import requests
-import time
-
 from tqdm import tqdm
 
 from datetime import date, timedelta
@@ -26,12 +22,12 @@ class TestLISIRDQuerying(unittest.TestCase):
 
     NUM_SAMPLES = 30 # Total samples to fetch per dataset
     FAILED_QUERY_TOLERANCE = 3 # Failed dates
-    TIMEOUT = 10 # seconds waiting for response
+    TIMEOUT = 20 # seconds waiting for response
     TEST_DIR = "./gfactor/tests/spectra"
     retriever = LISIRDRetriever()
     irradiance_identifiers = retriever.irradiance_identifiers
     other_identifiers = retriever.other_identifiers
-    STATUS_LOG = "./gfactor/tests/querying/LISIRD_datasets.json"
+    STATUS_LOG = "./gfactor/tests/querying/spectral_test_log.json"
 
 
     def test_retrieve_legal(self):
@@ -42,6 +38,7 @@ class TestLISIRDQuerying(unittest.TestCase):
         print(f"Number of samples per dataset: {TestLISIRDQuerying.NUM_SAMPLES}")
  
         identifiers = {**TestLISIRDQuerying.retriever.irradiance_identifiers, **TestLISIRDQuerying.retriever.other_identifiers}
+        
         # Load or initialize status log
         if Path(self.STATUS_LOG).exists():
             with open(self.STATUS_LOG, "r") as f:
@@ -59,6 +56,7 @@ class TestLISIRDQuerying(unittest.TestCase):
         with open(self.STATUS_LOG, "w") as f:
             json.dump(status_log, f, indent=2)
 
+        # Dataset category (affects dataframe type checking)
         for identifier in identifiers:
             extended_check = False
             if identifier in TestLISIRDQuerying.irradiance_identifiers:
@@ -88,7 +86,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             query_date = min_date
             
             failed_queries = 0
-            timeout = np.zeros_like(subsets, dtype=bool)
+            timeout = np.zeros_like(subsets, dtype=bool) # Boolean array indicating which subsets, if any, have timed out
             while query_date < max_date:
                 # Query
                 for i, subset in enumerate(subsets):
@@ -139,17 +137,39 @@ class TestLISIRDQuerying(unittest.TestCase):
                 query_date += timedelta(interval)
                 progress_bar.update(interval)
                 continue
-
+            
+            progress_bar.close()
 
             with open(self.STATUS_LOG, "w") as f:
                 json.dump(status_log, f, indent=2)
             self.assertLess(failed_queries, TestLISIRDQuerying.FAILED_QUERY_TOLERANCE)
+    
 
+    def test_dataset_validity(self):
+        """
+        Checks that all datasets in the status log have a 'working' status. Fails if any dataset or subset is not 'working'.
+        """
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            self.fail(f"Status log file {self.STATUS_LOG} does not exist.")
+
+        for dataset, value in status_log.items():
+            # If value is a dict of subsets
+            if isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
+                for subset, subval in value.items():
+                    status = subval.get("status", None)
+                    self.assertEqual(status, "working", f"Dataset '{dataset}', subset '{subset}' has status '{status}' (expected 'working')")
+            else:
+                status = value.get("status", None)
+                self.assertEqual(status, "working", f"Dataset '{dataset}' has status '{status}' (expected 'working')")
+    
 
     def test_retrieve_default_subset(self):
 
-        identifiers = {**TestLISIRDQuerying.retriever.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
-        
+        identifiers = self._get_working_identifiers()
+
         for identifier in identifiers:
 
             if identifier in TestLISIRDQuerying.irradiance_identifiers:
@@ -203,7 +223,7 @@ class TestLISIRDQuerying(unittest.TestCase):
         illegal_types = [5, 100.7, False]
         illegal_subset = 'test'
 
-        identifiers = {**TestLISIRDQuerying.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
+        identifiers = self._get_working_identifiers()
         
         for identifier in identifiers:
 
@@ -241,7 +261,7 @@ class TestLISIRDQuerying(unittest.TestCase):
 
         illegal_types = [None, 5, 100.7, False]
         
-        identifiers = {**TestLISIRDQuerying.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
+        identifiers = self._get_working_identifiers()
         
         for identifier in identifiers:
 
@@ -285,7 +305,7 @@ class TestLISIRDQuerying(unittest.TestCase):
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
 
-        identifiers = {**TestLISIRDQuerying.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
+        identifiers = self._get_working_identifiers()
 
         test_dir = Path(TestLISIRDQuerying.TEST_DIR)
 
@@ -357,7 +377,7 @@ class TestLISIRDQuerying(unittest.TestCase):
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
 
-        identifiers = {**TestLISIRDQuerying.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
+        identifiers = self._get_working_identifiers()
 
         test_dir = Path(TestLISIRDQuerying.TEST_DIR)
 
@@ -469,7 +489,7 @@ class TestLISIRDQuerying(unittest.TestCase):
         illegal_types = [5, 100.7, False]
         illegal_subset = 'test'
 
-        identifiers = {**TestLISIRDQuerying.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
+        identifiers = self._get_working_identifiers()
         
         for identifier in identifiers:
 
@@ -516,7 +536,7 @@ class TestLISIRDQuerying(unittest.TestCase):
 
         illegal_types = [None, 5, 100.7, False]
         
-        identifiers = {**TestLISIRDQuerying.irradiance_identifiers, **TestLISIRDQuerying.other_identifiers}
+        identifiers = self._get_working_identifiers()
 
         test_dir = Path(TestLISIRDQuerying.TEST_DIR)
         
@@ -569,3 +589,27 @@ class TestLISIRDQuerying(unittest.TestCase):
         # Remove test directory and associated files
         if test_dir.exists() and test_dir.is_dir():
             shutil.rmtree(Path(self.TEST_DIR))
+
+
+    def _get_working_identifiers(self):
+        """
+        Helper to return only identifiers and subsets with status 'working' in the status log.
+        Returns a dict: {identifier: [subsets]}
+        """
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            return {**self.irradiance_identifiers, **self.other_identifiers}
+
+        working = {}
+        for identifier, value in status_log.items():
+            if isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
+                # Has subsets
+                good_subsets = [subset for subset, subval in value.items() if subval.get("status") == "working"]
+                if good_subsets:
+                    working[identifier] = good_subsets
+            else:
+                if value.get("status") == "working":
+                    working[identifier] = [None]
+        return working

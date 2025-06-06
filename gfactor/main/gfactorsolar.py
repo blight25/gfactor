@@ -299,7 +299,7 @@ class SolarSpectrum(Spectrum1D):
             else:
                 data = SolarSpectrum.daily_retriever.retrieve(dataset=dataset,
                                                           subset=subset,
-                                                          date=date, 
+                                                          query_date=date, 
                                                           max_queries=1)
         
             # Unit Conversion
@@ -1041,7 +1041,7 @@ class SolarSpectrum(Spectrum1D):
 
 if __name__ == "__main__":
     sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
-    nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high", emissions={"Source: I made it up": [1212, 1220],                                                                                      "Lyman-alpha":[1214-1218]})
+    nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", emissions={"Source: I made it up": [1212, 1220], "Lyman-alpha":[1214-1218]})
     feature = [1301, 1303.5]
     height, mean, pixel_std = nnl.feature_fit(feature, height=5e-5, mean=1302.2, std=.4)
     output, downsampled, dc, fit_results = SolarSpectrum.daily_fit(poly_degree=5, 
