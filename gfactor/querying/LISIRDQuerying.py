@@ -308,7 +308,7 @@ class LISIRDRetriever():
                 raise ValueError(f"subset '{subset}' not recognized for dataset '{dataset}'. Available subsets are {subsets}.")
         
         elif subsets[-1] is not None:
-            raise ValueError(f"dataset '{dataset}' consists of subsets {subsets}, but 'subsets' was set to None. Please specify which ")
+            raise ValueError(f"dataset '{dataset}' consists of subsets {subsets}, but 'subsets' was set to None. Please specify which subset to retrieve.")
 
         dataset = dataset + "_" + subset if subset else dataset
         ds = datasets[dataset]["name"]
@@ -367,7 +367,7 @@ class LISIRDRetriever():
         dataset : str, optional
             Dataset to query. Default is "NNL".
         subset : str, optional
-            Subset of the dataset to query. Queries all subsets if None.
+            Subset of the dataset to query. Extracts for all subsets if None.
         start_date : str, optional
             Start date for querying in 'YYYY-MM-DD' format. Defaults to dataset's minimum date.
         end_date : str, optional
@@ -386,7 +386,7 @@ class LISIRDRetriever():
         None
         """
 
-         # Dataset Identification
+        # Dataset Identification
         if not isinstance(dataset, str):
             raise TypeError(f"Expected type 'str' for 'dataset', got type '{type(dataset)}' instead." 
                             f"\nAvailable irradiance (SSI) datasets are: {list(self.irradiance_identifiers.keys())}."
@@ -507,6 +507,7 @@ class LISIRDRetriever():
         else:
             end_date = default_end_date
         
+        # Message to console
         print(f"\nStart date of {start_date.strftime('%Y-%m-%d')}")
         print(f"End date of {end_date.strftime('%Y-%m-%d')}")
         print(f"Step size of {interval} day(s)\n")
@@ -525,15 +526,10 @@ class LISIRDRetriever():
 
             # Unless command is given to overwrite, continue if directory exists
             if cur_dir.exists() and not overwrite:
-                
-                # Write current date to file
-                with open(log_dir, "w") as query_file:
-                    query_file.write(query_date.strftime('%Y-%m-%d'))
 
                 # Update progress bar
                 query_date += timedelta(interval)
                 progress_bar.update(1)
-
                 continue
             
             # Otherwise, make the directory
@@ -551,7 +547,9 @@ class LISIRDRetriever():
                         status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                     with open (log_dir, "w") as f:
                         json.dump(status_log, f, indent=2)
-                except (requests.exceptions.Timeout, NoDataAvailableError) as e:  # Single indicate dataset is offline
+
+                # Indicates dataset is offline or unavailable
+                except (requests.exceptions.Timeout, NoDataAvailableError) as e:  
                     if sub is not None:
                         status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
                         status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
@@ -563,8 +561,12 @@ class LISIRDRetriever():
                     query_date += timedelta(interval)
                     progress_bar.update(1)
                     continue
-                except requests.exceptions.RequestException: # sometimes SSL closes connections which have been open for too long: try one more time
-                    time.sleep(10) # First, give server some time to breath
+
+                # Sometimes SSL closes connections which have been open for too long: try one more time
+                except requests.exceptions.RequestException:
+
+                    # First, give server some time to breath
+                    time.sleep(10) 
                     try: # Try one more time
                         data[sub] = self.retrieve(dataset=dataset, subset=sub, 
                                                     query_date=query_date.strftime("%Y-%m-%d"), timeout=timeout)
@@ -574,7 +576,9 @@ class LISIRDRetriever():
                             status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                         with open (log_dir, "w") as f:
                             json.dump(status_log, f, indent=2)
-                    except (requests.exceptions.Timeout, requests.exceptions.RequestException, NoDataAvailableError) as e: # Back-to-back failures isn't a coincidence
+
+                    # Back-to-back failures isn't a coincidence        
+                    except (requests.exceptions.Timeout, requests.exceptions.RequestException, NoDataAvailableError) as e: 
                         if sub is not None:
                             status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
                             status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")

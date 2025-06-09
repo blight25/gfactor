@@ -30,6 +30,30 @@ class TestLISIRDQuerying(unittest.TestCase):
     STATUS_LOG = "./gfactor/tests/querying/spectral_test_log.json"
 
 
+    def _get_working_identifiers(self):
+            """
+            Helper to return only identifiers and subsets with status 'working' in the status log.
+            Returns a dict: {identifier: [subsets]}
+            """
+            if Path(self.STATUS_LOG).exists():
+                with open(self.STATUS_LOG, "r") as f:
+                    status_log = json.load(f)
+            else:
+                return {**self.irradiance_identifiers, **self.other_identifiers}
+
+            working = {}
+            for identifier, value in status_log.items():
+                if isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
+                    # Has subsets
+                    good_subsets = [subset for subset, subval in value.items() if subval.get("status") == "working"]
+                    if good_subsets:
+                        working[identifier] = good_subsets
+                else:
+                    if value.get("status") == "working":
+                        working[identifier] = [None]
+            return working
+    
+
     def test_retrieve_legal(self):
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
@@ -163,44 +187,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     self.assertEqual(status, "working", f"Dataset '{dataset}', subset '{subset}' has status '{status}' (expected 'working')")
             else:
                 status = value.get("status", None)
-                self.assertEqual(status, "working", f"Dataset '{dataset}' has status '{status}' (expected 'working')")
-    
-
-    def test_retrieve_default_subset(self):
-
-        identifiers = self._get_working_identifiers()
-
-        for identifier in identifiers:
-
-            if identifier in TestLISIRDQuerying.irradiance_identifiers:
-                datasets = TestLISIRDQuerying.retriever.irradiance_datasets
-        
-            elif identifier in TestLISIRDQuerying.other_identifiers:
-                datasets = TestLISIRDQuerying.retriever.other_datasets
-            
-            # Date initialization - these will always be replaced once actual dates are located
-            min_date = date(year=1600, month=1, day=1)
-            max_date = date(year=2100, month=1, day=1)
-
-            subsets = identifiers[identifier]
-
-            # Only take the date range that works for all subsets
-            for subset in subsets:
-                dataset = identifier + "_" + subset if subset else identifier
-                min_date = max(min_date, datasets[dataset]['min_date'])
-                max_date = min(max_date, datasets[dataset]['max_date'])
-            
-            query_date = min_date.strftime("%Y-%m-%d")
-
-            # Test without specifying subset
-            self.retriever.retrieve(
-                dataset=identifier,
-                query_date=query_date,
-                subset=None,
-                timeout=self.TIMEOUT
-            )
-        
-        self.assertTrue(True)    
+                self.assertEqual(status, "working", f"Dataset '{dataset}' has status '{status}' (expected 'working')")  
 
 
     def test_retrieve_invalid_dataset(self):
@@ -214,8 +201,6 @@ class TestLISIRDQuerying(unittest.TestCase):
         
         with self.assertRaises(ValueError):
             self.retriever.retrieve(dataset=illegal_dataset, query_date="2012-01-01", subset=None, timeout=self.TIMEOUT)
-
-        self.assertTrue(True)
 
     
     def test_retrieve_invalid_subset(self):
@@ -245,16 +230,24 @@ class TestLISIRDQuerying(unittest.TestCase):
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
+            # Variables
             query_date = min_date.strftime("%Y-%m-%d")
             subset = subsets[-1]
 
-            # Invalid subset
+            # Subset exists, failure to specify should throw error
+            if subset is not None:
+                with self.assertRaises(ValueError):
+                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=None, timeout=self.TIMEOUT)
+            
+            # No subset exists, attempting to specify should throw error
+            else:
+                with self.assertRaises(ValueError):
+                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_subset, timeout=self.TIMEOUT)
+            
+            # Invalid typing
             for illegal_type in illegal_types:
                 with self.assertRaises(TypeError):
                     self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_type, timeout=self.TIMEOUT)
-            if subset is not None:
-                with self.assertRaises(ValueError):
-                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_subset, timeout=self.TIMEOUT)
     
 
     def test_retrieve_invalid_date(self):
@@ -275,37 +268,38 @@ class TestLISIRDQuerying(unittest.TestCase):
             min_date = date(year=1600, month=1, day=1)
             max_date = date(year=2100, month=1, day=1)
 
-            subsets = identifiers[identifier]
-
             # Only take the date range that works for all subsets
+            subsets = identifiers[identifier]
             for subset in subsets:
                 dataset = identifier + "_" + subset if subset else identifier
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
+            # Variables
             early_date = min_date - timedelta(days=10)
             early_date = early_date.strftime("%Y-%m-%d")
             late_date = max_date + timedelta(days=10)
             late_date = late_date.strftime("%Y-%m-%d")
 
-            # Type checking
-            for illegal_type in illegal_types:
-                with self.assertRaises(TypeError):
-                    self.retriever.retrieve(dataset=identifier, query_date=illegal_type, subset=subset, timeout=self.TIMEOUT)
-
             # Below minimum and above maximum
             for query_date in (early_date, late_date):
                 with self.assertRaises(ValueError):
                     self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=subset, timeout=self.TIMEOUT)
-        
-        self.assertTrue(True)
+
+            # Invalid typing
+            for illegal_type in illegal_types:
+                with self.assertRaises(TypeError):
+                    self.retriever.retrieve(dataset=identifier, query_date=illegal_type, subset=subset, timeout=self.TIMEOUT)
     
 
     def test_extract_legal(self):
-
+        
+        # For irradiance datatsets only
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
 
+        # Dataset names and subsets
         identifiers = self._get_working_identifiers()
+        all_identifiers = {**self.irradiance_identifiers, **self.other_identifiers}
 
         test_dir = Path(TestLISIRDQuerying.TEST_DIR)
 
@@ -323,18 +317,25 @@ class TestLISIRDQuerying(unittest.TestCase):
             min_date = date(year=1600, month=1, day=1)
             max_date = date(year=2100, month=1, day=1)
 
+            # Only take the date range that works for all subsets
             subsets = identifiers[identifier]
 
-            # Only take the date range that works for all subsets
+            # Ensure that this dataset and ALL of its subsets (if they exist) are operational before testing
+            if identifier not in all_identifiers or len(subsets) == len(all_identifiers[identifier]):
+                continue
+
             for subset in subsets:
                 dataset = identifier + "_" + subset if subset else identifier
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
+            # Variables
             interval = (max_date - min_date).days - 1
             start_date = min_date.strftime("%Y-%m-%d")
             end_date = min_date + timedelta(days=interval)
             end_date = end_date.strftime("%Y-%m-%d")
+
+            # Extract
             TestLISIRDQuerying.retriever.extract(
                 dataset=identifier,
                 subset=None,
@@ -350,6 +351,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             local_dir = Path(TestLISIRDQuerying.TEST_DIR + "/" + identifier)
             local_dir.mkdir(parents=True, exist_ok=True)
 
+            # Subsets
             for subset in subsets:
                 for query_date in (start_date, end_date):
                     file = identifier + "_" + subset + ".pickle" if subset else identifier + ".pickle"
@@ -406,6 +408,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     min_date = max(min_date, datasets[dataset]['min_date'])
                     max_date = min(max_date, datasets[dataset]['max_date'])
                 
+                # Variables
                 interval = (max_date - min_date).days - 1
                 start_date = min_date.strftime("%Y-%m-%d")
                 end_date = min_date + timedelta(days=interval)
@@ -426,7 +429,8 @@ class TestLISIRDQuerying(unittest.TestCase):
                 # Check that files exist
                 local_dir = Path(TestLISIRDQuerying.TEST_DIR + "/" + identifier)
                 local_dir.mkdir(parents=True, exist_ok=True)
-            
+
+                # File testing
                 for query_date in (start_date, end_date):
 
                     # File for first subset should exist and be usable
@@ -503,18 +507,16 @@ class TestLISIRDQuerying(unittest.TestCase):
             min_date = date(year=1600, month=1, day=1)
             max_date = date(year=2100, month=1, day=1)
 
-            subsets = identifiers[identifier]
-
             # Only take the date range that works for all subsets
+            subsets = identifiers[identifier]
             for subset in subsets:
                 dataset = identifier + "_" + subset if subset else identifier
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
-            query_date = min_date.strftime("%Y-%m-%d")
-            subset = subsets[-1]
+           
 
-            # Invalid subset
+            # Type Checking 
             for illegal_type in illegal_types:
                 with self.assertRaises(TypeError):
                     self.retriever.extract(dataset=identifier, subset=illegal_type,
@@ -523,6 +525,9 @@ class TestLISIRDQuerying(unittest.TestCase):
                                           end_date=max_date,
                                           overwrite=True,
                                           timeout=self.TIMEOUT)
+            
+            # Illegal Value
+            subset = subsets[-1]        
             if subset is not None:
                 with self.assertRaises(ValueError):
                     self.retriever.extract(dataset=identifier, subset=illegal_subset,
@@ -531,6 +536,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                                           end_date=max_date,
                                           overwrite=True,
                                           timeout=self.TIMEOUT)
+                    
 
     def test_extract_invalid_date(self):
 
@@ -552,18 +558,29 @@ class TestLISIRDQuerying(unittest.TestCase):
             min_date = date(year=1600, month=1, day=1)
             max_date = date(year=2100, month=1, day=1)
 
-            subsets = identifiers[identifier]
-
             # Only take the date range that works for all subsets
+            subsets = identifiers[identifier]
             for subset in subsets:
                 dataset = identifier + "_" + subset if subset else identifier
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
+            # Variables
             early_date = min_date - timedelta(days=10)
             early_date = early_date.strftime("%Y-%m-%d")
             late_date = max_date + timedelta(days=10)
             late_date = late_date.strftime("%Y-%m-%d")
+
+            # Below minimum and above maximum
+            for begin_date in (None, early_date):
+                for finish_date in (None, late_date):
+                    if begin_date is None and finish_date is None:
+                        continue
+                    with self.assertRaises(ValueError):
+                        self.retriever.extract(dataset=identifier, start_date=begin_date,
+                                              end_date=finish_date, interval=1,
+                                              save_dir=self.TEST_DIR,
+                                              subset=None, timeout=self.TIMEOUT)
 
             # Type checking
             for i in range(len(illegal_types)):
@@ -575,41 +592,10 @@ class TestLISIRDQuerying(unittest.TestCase):
                                               end_date=illegal_types[j], interval=1,
                                               save_dir=self.TEST_DIR,
                                               subset=None, timeout=self.TIMEOUT)
-            # Below minimum and above maximum
-            for begin_date in (None, early_date):
-                for finish_date in (None, late_date):
-                    if begin_date is None and finish_date is None:
-                        continue
-                    with self.assertRaises(ValueError):
-                        self.retriever.extract(dataset=identifier, start_date=begin_date,
-                                              end_date=finish_date, interval=1,
-                                              save_dir=self.TEST_DIR,
-                                              subset=None, timeout=self.TIMEOUT)
-        
+            
         # Remove test directory and associated files
         if test_dir.exists() and test_dir.is_dir():
             shutil.rmtree(Path(self.TEST_DIR))
 
 
-    def _get_working_identifiers(self):
-        """
-        Helper to return only identifiers and subsets with status 'working' in the status log.
-        Returns a dict: {identifier: [subsets]}
-        """
-        if Path(self.STATUS_LOG).exists():
-            with open(self.STATUS_LOG, "r") as f:
-                status_log = json.load(f)
-        else:
-            return {**self.irradiance_identifiers, **self.other_identifiers}
-
-        working = {}
-        for identifier, value in status_log.items():
-            if isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
-                # Has subsets
-                good_subsets = [subset for subset, subval in value.items() if subval.get("status") == "working"]
-                if good_subsets:
-                    working[identifier] = good_subsets
-            else:
-                if value.get("status") == "working":
-                    working[identifier] = [None]
-        return working
+    
