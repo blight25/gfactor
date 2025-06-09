@@ -411,7 +411,6 @@ class LISIRDRetriever():
         # Create save directory
         dataset_dir = Path(save_dir + "/" + dataset)
         dataset_dir.mkdir(parents=True, exist_ok=True)
-        print(f"\nResults to be saved in directory {dataset_dir}")
 
         # Create json file for logging
         save_dir = Path(save_dir)
@@ -426,12 +425,12 @@ class LISIRDRetriever():
         if subsets[-1] is not None:
             if overwrite or dataset not in status_log:
                 status_log[dataset] = {}
-                for subset in subsets:
-                    status_log[dataset][subset] = {"last_date_queried":None, "bad_dates": [], "status":"working"}
+                for sub in subsets:
+                    status_log[dataset][sub] = {"last_date_queried":None, "bad_dates": [], "status":"working"}
         else:
             if overwrite or dataset not in status_log:
                 status_log[dataset] = {}
-                for subset in subsets:
+                for sub in subsets:
                     status_log[dataset] = {"last_date_queried":None, "bad_dates": [], "status":"working"}
     
         with open(log_dir, "w") as f:
@@ -452,11 +451,11 @@ class LISIRDRetriever():
             
             else:
                 print(f"\n------------- Beginning query of {dataset}, subset: {subset} --------------\n")
-            subs = [subset]
+            subsets = [subset]
         
         else:
             print(f"\n------------- Beginning query of {dataset}, subsets: {identifiers[dataset]} --------------\n")
-            subs = identifiers[dataset]
+            subsets = identifiers[dataset]
         
         
         # Min and max dates - for subset extraction, will be bounded by strictest time window
@@ -537,7 +536,7 @@ class LISIRDRetriever():
             
             # Subset loop
             data = {}
-            for sub in subs:
+            for sub in subsets:
                 try:
                     data[sub] = self.retrieve(dataset=dataset, subset=sub, 
                                                 query_date=query_date.strftime("%Y-%m-%d"), timeout=timeout)

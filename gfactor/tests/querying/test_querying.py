@@ -514,8 +514,6 @@ class TestLISIRDQuerying(unittest.TestCase):
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
-           
-
             # Type Checking 
             for illegal_type in illegal_types:
                 with self.assertRaises(TypeError):
@@ -596,6 +594,3 @@ class TestLISIRDQuerying(unittest.TestCase):
         # Remove test directory and associated files
         if test_dir.exists() and test_dir.is_dir():
             shutil.rmtree(Path(self.TEST_DIR))
-
-
-    
