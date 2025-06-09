@@ -123,13 +123,7 @@ class LISIRDRetriever():
         init_url = self.__url_build(ds)
         params = self.__param_build(prjn, slctn, optn)
         url = init_url + "?" + params
-        try:
-            response = requests.get(url, timeout=timeout)
-        except requests.exceptions.Timeout as e:
-            raise requests.exceptions.Timeout(f"Request to {url} timed out after {timeout} seconds.") from e
-        if not response:
-            print(response.text)
-            return None
+        response = requests.get(url, timeout=timeout)
         
         # Return data
         df = pd.read_csv(io.StringIO(response.content.decode('utf-8')))
@@ -337,7 +331,7 @@ class LISIRDRetriever():
         try:
             df = self.__query(ds=ds, slctn=slctn, timeout=timeout)
         except requests.exceptions.Timeout as e:
-            raise RuntimeError(f"Timeout occurred while querying dataset '{dataset}' on {query_date.strftime('%Y-%m-%d')}: you can check data availability from LISIRD directly"
+            raise RuntimeError(f"Timeout occurred while querying dataset '{dataset}' on {query_date.strftime('%Y-%m-%d')}: process exceeded {timeout} seconds. You can check data availability from LISIRD directly"
                                "\nat https://lasp.colorado.edu/lisird/. In some cases, data may appear to be available on LISIRD, but is no longer accessible through the API.") from e
             
         # Check for successful query
@@ -416,8 +410,11 @@ class LISIRDRetriever():
         save_dir = Path(save_dir)
         log_dir = save_dir / "extraction_log.json"
         if Path(log_dir).exists():
-            with open(log_dir, "r") as f:
-                status_log = json.load(f)
+            try:
+                with open(log_dir, "r") as f:
+                    status_log = json.load(f)
+            except json.decoder.JSONDecodeError:
+                status_log = {}
         else:
             status_log = {}
         
@@ -548,12 +545,12 @@ class LISIRDRetriever():
                         json.dump(status_log, f, indent=2)
 
                 # Indicates dataset is offline or unavailable
-                except (requests.exceptions.Timeout, NoDataAvailableError) as e:  
+                except (RuntimeError, NoDataAvailableError) as e:  
                     if sub is not None:
-                        status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
+                        status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), f"{e}"))
                         status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                     else:
-                        status_log[dataset]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
+                        status_log[dataset]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), f"{e}"))
                         status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                     with open (log_dir, "w") as f:
                         json.dump(status_log, f, indent=2)
@@ -577,7 +574,7 @@ class LISIRDRetriever():
                             json.dump(status_log, f, indent=2)
 
                     # Back-to-back failures isn't a coincidence        
-                    except (requests.exceptions.Timeout, requests.exceptions.RequestException, NoDataAvailableError) as e: 
+                    except (RuntimeError, requests.exceptions.RequestException, NoDataAvailableError) as e: 
                         if sub is not None:
                             status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
                             status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")

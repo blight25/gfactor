@@ -11,6 +11,7 @@ from pathlib import Path
 class TestAtomic(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
+        
         super().__init__(*args, **kwargs)
 
         self.required_cols = {"obs_wl(A)" : float, 
@@ -29,7 +30,6 @@ class TestAtomic(unittest.TestCase):
                               "sp_num": float}
         
         self.optional_cols = {"unc_obs_wl": float}
-        
         self.atomic_dir = Path("./data/atomic")
         self.atomic_dir.mkdir(parents=True, exist_ok=True)
         self.retriever = NISTRetriever()
@@ -51,45 +51,34 @@ class TestAtomic(unittest.TestCase):
                                  'Ts', 'Md', 'Pu', 'Np'}
 
 
-    def test_load_new(self):
+    def test_retrieve(self):
 
         # Loop through random subset of elements (full query is infeasible for reasonable runtimes)
         elements = random.sample(self.elements, k=20)
 
-        for element in elements:
-            if element in self.problem_elements:
-                try:
-                    AtomicData.load_nist(elements=[element])
-                except ValueError:
-                    continue
-                self.fail(f"Value Error should have been raised for known problematic element {element}")
-            
+        for el in elements:
+            if el in self.problem_elements:
+                with self.assertRaises(ValueError):
+                    self.retriever.retrieve(elements=[el], ionized=False, save_dir=None)
             else:
                 for ionization in (True, False):
-                    df = AtomicData.load_nist(elements=[element], ionized=ionization)
+                    results = self.retriever.retrieve(elements=[el], ionized=ionization, save_dir=None)
+                    df = results[el]
                     for col in self.required_cols:
-                        if col not in df.columns:
-                            self.fail(f"Required column {col} is missing for element {element}")
+                        self.assertIn(col, df.columns)
                         dtype = df[col].dtype
                         # Map NumPy dtype to Python type
                         python_type = float if np.issubdtype(dtype, np.floating) else int if np.issubdtype(dtype, np.int_) else str if np.issubdtype(dtype, np.str_) else None
-                        if python_type is None:
-                            self.fail(f"Unexpected dtype {dtype} for column '{col}'")
-                        elif python_type != self.required_cols[col]:
-                            self.fail(f"data type of {dtype} for '{col}' does not match expected data type of {self.required_cols[col]}")
+                        self.assertIsNotNone(python_type)
+                        self.assertEqual(python_type, self.required_cols[col])
                         
                     for col in self.optional_cols:
                         if col in df.columns:
                             dtype = df[col].dtype
                             # Map NumPy dtype to Python type
                             python_type = float if np.issubdtype(dtype, np.floating) else int if np.issubdtype(dtype, np.int_) else str if np.issubdtype(dtype, np.str_) else None
-                            if python_type is None:
-                                self.fail(f"Unexpected dtype {dtype} for column '{col}'")
-                            elif python_type != self.optional_cols[col]:
-                                self.fail(f"data type of {dtype} for '{col}' does not match expected data type of {self.required_cols[col]}")
-        
-        # Passed
-        self.assertTrue(True)
+                            self.assertIsNotNone(python_type)
+                            self.assertEqual(python_type, self.optional_cols[col])
 
 
     def test_load(self):
@@ -134,15 +123,3 @@ class TestAtomic(unittest.TestCase):
             
         # Passed
         self.assertTrue(True)
-    
-    
-
-                    
-
-
-
-
-
-
-        
-        

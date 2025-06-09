@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 
 import math
+import random
 
 import numpy as np
 import pandas as pd
@@ -321,7 +322,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             subsets = identifiers[identifier]
 
             # Ensure that this dataset and ALL of its subsets (if they exist) are operational before testing
-            if identifier not in all_identifiers or len(subsets) == len(all_identifiers[identifier]):
+            if identifier not in all_identifiers or not len(subsets) == len(all_identifiers[identifier]):
                 continue
 
             for subset in subsets:
@@ -594,3 +595,108 @@ class TestLISIRDQuerying(unittest.TestCase):
         # Remove test directory and associated files
         if test_dir.exists() and test_dir.is_dir():
             shutil.rmtree(Path(self.TEST_DIR))
+
+
+class TestNISTQuerying(unittest.TestCase):
+
+    NUM_SAMPLES = 10 # Atomic samples in extract
+    TEST_DIR = "./gfactor/tests/spectra"
+    required_cols = {"obs_wl(A)" : float, 
+                    "fik" : float, 
+                    "term_k" : str,  
+                    "conf_k": str, 
+                    "Ek(eV)": float,
+                    "J_k": float,
+                    "term_i": str, 
+                    "conf_i": str, 
+                    "Ei(eV)": float,
+                    "J_i": float,
+                    "Acc" : float, 
+                    "Aki(s^-1)" : float, 
+                    "element" : str, 
+                    "sp_num": float}
+    
+    optional_cols = {"unc_obs_wl": float}
+
+    elements = [
+                'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'K', 'Ar', 'Ca', 
+                'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Ni', 'Co', 'Cu', 'Zn', 'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 
+                'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn', 'Sb', 'I', 'Te', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 
+                'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 
+                'Pt', 'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Pa', 'Th', 'Np', 'U', 'Am', 'Pu', 'Cm', 
+                'Bk', 'Cf', 'Es', 'Fm', 'Md', 'No', 'Lr', 'Rf', 'Db', 'Bh', 'Sg', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 
+                'Lv', 'Ts', 'Og'
+                ]
+
+    # Known to fail: 'U' yields ValueError, all other queries proceed but produce invalid DataFrames
+    problem_elements = {'Mt', 'At', 'Fm', 'U', 'Rf', 'Cf', 'Pa', 'No', 'Sg', 'Am', 'Pr', 'Nb', 
+                        'Lr', 'Rn', 'Lv', 'Zr', 'Os', 'Hs', 'Og', 'Mc', 'Cm', 'Fl', 'Cn', 'Db', 
+                        'Bk', 'Re', 'Rg', 'Po', 'Tb', 'Ds', 'Es', 'Th', 'Pm', 'Se', 'Bh', 'Nh', 
+                        'Ts', 'Md', 'Pu', 'Np'}
+
+    retriever = NISTRetriever()
+
+
+    def _map_numpy_dtype_to_python(self, dtype):
+        """
+        Map a numpy/pandas dtype to the corresponding Python type (float, int, str, or None).
+        Handles pandas extension types like string[python].
+        """
+
+        if pd.api.types.is_string_dtype(dtype):
+            return str
+        elif np.issubdtype(dtype, np.floating):
+            return float
+        elif np.issubdtype(dtype, np.integer):
+            return int
+        else:
+            return None
+
+
+    def test_retrieve_legal(self):
+
+        # Loop through random subset of elements (full query is infeasible for reasonable runtimes)
+        elements = random.sample(TestNISTQuerying.elements, k=TestNISTQuerying.NUM_SAMPLES)
+
+        for el in elements:
+            if el in TestNISTQuerying.problem_elements:
+                    results = TestNISTQuerying.retriever.retrieve(elements=[el], ionized=False)
+                    df = results[el]
+                    self.assertIsNone(df) # Elements with bad data are set to None
+            else:
+                for ionization in (True, False):
+                    results = TestNISTQuerying.retriever.retrieve(elements=[el], ionized=ionization)
+                    df = results[el]
+                    for col in TestNISTQuerying.required_cols:
+                        self.assertIn(col, df.columns)
+                        dtype = df[col].dtype
+                        python_type = self._map_numpy_dtype_to_python(dtype)
+                        self.assertIsNotNone(python_type)
+                        self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
+                    for col in TestNISTQuerying.optional_cols:
+                        if col in df.columns:
+                            dtype = df[col].dtype
+                            python_type = self._map_numpy_dtype_to_python(dtype)
+                            self.assertIsNotNone(python_type)
+                            self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
+    
+
+    def test_retrieve_invalid_elements(self):
+
+        illegal_types = [None, 5, 100.7, False]
+        illegal_element = "test"
+
+        for type in illegal_types:
+            with self.assertRaises(TypeError):
+                results = TestNISTQuerying.retriever.retrieve(elements=[type], ionized=False)
+        
+        with self.assertRaises(ValueError):
+            results = TestNISTQuerying.retriever.retrieve(elements=[illegal_element], ionized=False)
+    
+    
+    def test_retrieve_invalid_ionization(self):
+
+        illegal_types = [None, 5, 100.7, "test"]
+        for type in illegal_types:
+            with self.assertRaises(TypeError):
+                results = TestNISTQuerying.retriever.retrieve(elements=["H"], ionized=type)

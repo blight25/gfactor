@@ -195,7 +195,7 @@ class NISTRetriever:
         return url
     
 
-    def __clean(self, df:pd.DataFrame, elements:List[str]):
+    def __clean(self, df:pd.DataFrame, element:str):
 
         """
         Sequence of operations to tidy up column notation, standardize data types, etc.
@@ -204,7 +204,7 @@ class NISTRetriever:
         ----------
         df : pd.DataFrame
             Resultant DataFrame from successful query.
-        elements : List[str]
+        elements : str
             Atomic species targeted in the query.
 
         Returns
@@ -221,7 +221,7 @@ class NISTRetriever:
         missing_wavelengths = [col for col in wavelength_cols if col not in df.columns]
         
         if len(df) == 0 or len(missing_cores) > 0 or len(missing_wavelengths) == 2:
-            raise ValueError(f"No data available for these parameters: atoms -> {elements}")
+            raise ValueError(f"No data available for element '{element}'")
         
         # Bring all wavelength data under the same header
         if "obs_wl_air(A)" in df.columns:
@@ -272,13 +272,13 @@ class NISTRetriever:
         
         # For whatever reason, hydrogen isn't included if queried individually
         if 'element' not in df.columns:
-            df['element'] = elements[0]
+            df['element'] = element
             df['sp_num'] = 1.0
 
         return df
     
 
-    def retrieve(self, elements: List[str], ionized=False, save_dir:str=None, overwrite=False) -> pd.DataFrame:
+    def retrieve(self, elements: List[str], ionized=False, timeout=10) -> dict[str, pd.DataFrame]:
         
         """
         Retrieve data from NIST Atomic Database.
@@ -289,56 +289,53 @@ class NISTRetriever:
             Atomic species to be queried for.
         ionized : bool, optional
             Indicates whether or not ionized transitions will be included.
-        save_dir : str, optional
-            Saves CSV to this directory if provided.
         overwrite : bool, optional
             If True (and save_dir is not None), forcibly overwrite existing files.
 
         Returns
         -------
-        df : pd.DataFrame
-            Results from API request.
+        dataframes : dict[str, pd.DataFrame]
+            Maps elements to their dataframes - any elements with bad data will be mapped to None
         """
 
-        # Save to an external file
-        if save_dir:
+        dataframes = {}
 
-            # Construct os path
-            dir = Path(save_dir)
-            dir.mkdir(parents=True, exist_ok=True)
-            elements_str = " ".join(elements)
+        for el in elements:
 
-            if ionized:
-                save_file = dir / f"{elements_str}_ionized.csv"
-            else:
-                save_file = dir / f"{elements_str}.csv"
+            # Type checking
+            if not isinstance(el, str):
+                raise TypeError(f"Expected 'elements' to contain items of type 'str', found type '{type(el)}' instead.")
+
+            if not isinstance(ionized, bool):
+                raise TypeError(f"Expected 'ionization' to be of type 'bool', found type '{type(ionized)}' instead.")
+
+            # Confirm element data available
+            if el not in self.elements_by_mass:
+                raise ValueError(f"{el} is not a recognizeable element")
             
-            if not overwrite and save_file.exists():
-                return None # Data already exists
+            # Construct URL
+            url = self.__url_build(elements, ionized)
 
-        # Construct URL
-        url = self.__url_build(elements, ionized)
+            # Retrieve data
+            try:
+                response = requests.get(url, timeout=timeout)
+            except requests.exceptions.Timeout as e:
+                raise RuntimeError(f"Request to {url} timed out after {timeout} seconds.") from e
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", category=ParserWarning)
+                df = pd.read_csv(io.StringIO(response.content.decode('utf-8')), delimiter="\t", 
+                                index_col=False, dtype=str)
+                # Check if any warnings were captured
+                if len(w) != 0:
+                    dataframes[el] = None
+                else:
+                    df = self.__clean(df, el)
+                    dataframes[el] = df
+                    
+        return dataframes
 
-        # Retrieve data
-        response = requests.get(url)
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always", category=ParserWarning)
-            df = pd.read_csv(io.StringIO(response.content.decode('utf-8')), delimiter="\t", 
-                            index_col=False, dtype=str)
-            # Check if any warnings were captured
-            if len(w) != 0:
-                return None # Faulty dataframe
-            
-        # Clean, save, return data
-        df = self.__clean(df, elements)
 
-        if save_dir:
-            df.to_csv(save_file)
-
-        return df
-    
-
-    def extract(self, save_dir:str, error_dir:str, overwrite=False):
+    def extract(self, save_dir:str = "../data/atomic", overwrite=False):
 
         """
         Sweeps through 'elements_by_mass' object dictionary, querying all available
@@ -363,10 +360,6 @@ class NISTRetriever:
         dir = Path(save_dir)
         dir.mkdir(parents=True, exist_ok=True)
 
-        # Subdirectories
-        ionized_dir = dir / "ionized"
-        standard_dir = dir / "standard"
-
         # Elements List
         elements = list(self.elements_by_mass.keys())
         elements.sort(key = lambda x: self.elements_by_mass[x])
@@ -374,59 +367,75 @@ class NISTRetriever:
         # Progress Bar
         progress_bar = tqdm(total=len(elements), desc="Querying")
 
-        # Setup file for recording problem dates and queried dates
-        error_dir = Path(error_dir)
-        error_dir.mkdir(parents=True, exist_ok=True)
-        error_file = error_dir / "problem_elements.json"
-        error_data = []  # Initialize a list to store error information
-        error_els = set()
+        # Setup log file
+        log_dir = save_dir / "extraction_log.json"
+        if Path(log_dir).exists():
+            with open(log_dir, "r") as f:
+                status_log = json.load(f)
+        else:
+            status_log = {}
 
         # Loop through all elements
-        for element in elements:
-            for cur_dir, ionization in [(standard_dir, False), (ionized_dir, True)]:
+        for el in elements:
+            
+            # Default for status log, if necessary
+            if overwrite or el not in status_log:
+                status_log[el] = {"standard": None, "ionized": None}
 
+            for ionization in (False, True):
+                status = "available"
+                path = dir / f"{el}_ionized.pickle" if ionization else dir / f"{el}.pickle"
+
+                # Move on to next element if data already exists 
+                if path.exists() and not overwrite:
+                    break
+                
                 # Retrieval
                 try:
-                    df = self.retrieve(elements=[element], ionized=ionization, 
-                                  save_dir=cur_dir, overwrite=overwrite)
-                    
+                    results = self.retrieve(elements=[el], ionized=ionization)
+                    df = results[el]
+                    pd.to_pickle(df, path)
                     # Request processes, but no data available
                     if df is None:
-                        error_data.append({"Element": element, "Ionized": ionization, "Request Error": False, "Value Error": False})
-                        error_els.add(element)
+                        status = "bad data"
 
-                except Exception as e:
-                    if isinstance(e, ValueError):
-                        error_data.append({"Element": element, "Ionized": ionization, "Request Error": False, "Value Error": True})
-                        error_els.add(element)
-                    
-                    # Sometimes the connection needs to be closed to give the server a breather
-                    elif isinstance(e, requests.exceptions.RequestException):
-                        time.sleep(5)  # Rest period
+                # Results for this element are offline
+                except requests.exceptions.Timeout:
+                    status = "unavailable"
+
+                # Sometimes SSL closes connections which have been open for too long: try one more time
+                except requests.exceptions.RequestException:
+                        
+                        # First, give server some time to breath
+                        time.sleep(10)  
 
                         # Attempt same query again
                         try:
-                            df = self.retrieve(elements=[element], ionized=ionization, 
-                                          save_dir=cur_dir, overwrite=overwrite)
-                            
+                            results = self.retrieve(elements=[el], ionized=ionization)
+                            df = results[el]
+                            pd.to_pickle(df, path)
                             # Request processes, but no data available
                             if df is None:
-                                error_data.append({"Element": element, "Ionized": ionization, "Request Error": False, "Value Error": False})
-                                error_els.add(element)
+                                status = "bad data"
 
-                        # If a second error is encountered, it must be more than just a connectivity issue
+                        # Back-to-back failures isn't a coincidence 
                         except requests.exceptions.RequestException:
-                            error_data.append({"Element": element, "Ionized": ionization, "Request Error": True, "Value Error": False})
-                            error_els.add(element)
+                               status = "unavailable"
+
+                # Write to log file
+                if ionization:
+                    status_log['Element']["Ionized"] = {"status":status}
+                else:
+                    status_log['Element']["Standard"] = {"status":status}
+                
+                # Write error data to JSON file
+                with open(log_dir, "w") as f:
+                    json.dump(status_log, f, indent=2)
 
             # Next element
             progress_bar.update(1)
 
-        # Write error data to JSON file
-        with open(error_file, "w") as problem_file:
-            json.dump(error_data, problem_file, indent=4)
         
-        print(error_els)
         
 
 def parse_args():

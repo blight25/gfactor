@@ -75,9 +75,7 @@ class AtomicData:
         for idx, el in enumerate(elements):
 
             # Confirm element data available
-            if el not in AtomicData.elements_by_mass:
-                raise ValueError(f"{el} is not a recognizeable element")
-            elif el in AtomicData.problem_elements:
+            if el in AtomicData.problem_elements:
                 raise ValueError(f"No eligible data for element {el}")
             
             # Pick the per-element file
@@ -94,7 +92,8 @@ class AtomicData:
             if exists:
                 df = pd.read_csv(path)
             else:
-                df = retriever.retrieve(elements=[el], ionized=ionized)
+                results = retriever.retrieve(elements=[el], ionized=ionized)
+                df = results[el]
                 if df is None:
                     raise ValueError(f"No eligible data for element {el}")
 
