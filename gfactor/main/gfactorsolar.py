@@ -17,6 +17,8 @@ from scipy.special import legendre
 
 from lmfit import Parameters, minimize
 
+import time
+
 
 class SolarSpectrum(Spectrum1D):
 
@@ -249,7 +251,7 @@ class SolarSpectrum(Spectrum1D):
                  
         3. {TIMED: https://lasp.colorado.edu/lisird/data/timed_see_ssi_l3}
 
-        For spectra with both high and low resolution designations, both versions will be loaded
+        For spectra with both low and high resolution designations, both versions will be loaded
         and returned as tuple of SolarSpectrum objects (low-res, high-res): you can always
         check the '.name' attribute to confirm which is which. Note that the chosen date may not always 
         be valid for both subsets - in this case, the unavailable subset will be set to None.
@@ -289,8 +291,10 @@ class SolarSpectrum(Spectrum1D):
         subsets = SolarSpectrum.daily_retriever.irradiance_identifiers # Get subsets
         specs = []
         for subset in subsets[dataset]:
-            
-            file = daily_dir / date / subset / ".pickle" if daily_dir else None # Filename
+            if subset:
+                file = daily_dir / date / f"{dataset}_{subset}.pickle" if daily_dir else None # Filename
+            else:
+                file = daily_dir / date / f"{dataset}.pickle" if daily_dir else None # Filename
 
             # Read internally
             if file and file.exists():
@@ -299,8 +303,8 @@ class SolarSpectrum(Spectrum1D):
             else:
                 data = SolarSpectrum.daily_retriever.retrieve(dataset=dataset,
                                                           subset=subset,
-                                                          query_date=date, 
-                                                          max_queries=1)
+                                                          query_date=date,
+                                                          timeout=10)
         
             # Unit Conversion
             wavelengths = data["wavelength (nm)"] * 10
@@ -1040,13 +1044,18 @@ class SolarSpectrum(Spectrum1D):
 
 
 if __name__ == "__main__":
+
+    # Get the absolute path to the current file (LISIRDQuerying.py)
+    current_file = Path(__file__).resolve()
+
+    # Get the package root (assuming this file is always in gfactor/querying/)
+    package_root = current_file.parents[2]  # gfactor/
+
+    dir = (package_root / "data" / "spectra").as_posix()
+
     sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
-    nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", emissions={"Source: I made it up": [1212, 1220], "Lyman-alpha":[1214-1218]})
-    feature = [1301, 1303.5]
-    height, mean, pixel_std = nnl.feature_fit(feature, height=5e-5, mean=1302.2, std=.4)
-    output, downsampled, dc, fit_results = SolarSpectrum.daily_fit(poly_degree=5, 
-                                                            sumer=sumer,
-                                                            daily_spec=nnl, 
-                                                            gaussian_std = pixel_std,
-                                                            fit='polynomial')
+    start = time.time()
+    nnl = SolarSpectrum.daily_spectrum(date="2023-04-03", dataset="NNL", daily_dir=None)
+    end = time.time()
+    print(end - start)
 

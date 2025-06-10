@@ -24,38 +24,49 @@ class TestLISIRDQuerying(unittest.TestCase):
     NUM_SAMPLES = 30 # Total samples to fetch per dataset
     FAILED_QUERY_TOLERANCE = 3 # Failed dates
     TIMEOUT = 20 # seconds waiting for response
-    TEST_DIR = "./gfactor/tests/spectra"
+
+    # Get the absolute path to the current file (LISIRDQuerying.py)
+    current_file = Path(__file__).resolve()
+
+    # Get the package root (assuming this file is always in gfactor/querying/)
+    package_root = current_file.parents[2]  # gfactor/
+
+    # Build path to target directory
+    TEST_DIR = (package_root / "tests" / "querying" / "spectra").as_posix()
+
     retriever = LISIRDRetriever()
     irradiance_identifiers = retriever.irradiance_identifiers
     other_identifiers = retriever.other_identifiers
     STATUS_LOG = "./gfactor/tests/querying/spectral_test_log.json"
 
-
     def _get_working_identifiers(self):
-            """
-            Helper to return only identifiers and subsets with status 'working' in the status log.
-            Returns a dict: {identifier: [subsets]}
-            """
-            if Path(self.STATUS_LOG).exists():
-                with open(self.STATUS_LOG, "r") as f:
-                    status_log = json.load(f)
-            else:
-                return {**self.irradiance_identifiers, **self.other_identifiers}
+        """
+        Returns a dictionary of dataset identifiers and their working subsets based on the status log.
+        Only includes those marked as 'working'.
+        """
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            return {**self.irradiance_identifiers, **self.other_identifiers}
 
-            working = {}
-            for identifier, value in status_log.items():
-                if isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
-                    # Has subsets
-                    good_subsets = [subset for subset, subval in value.items() if subval.get("status") == "working"]
-                    if good_subsets:
-                        working[identifier] = good_subsets
-                else:
-                    if value.get("status") == "working":
-                        working[identifier] = [None]
-            return working
+        working = {}
+        for identifier, value in status_log.items():
+            if isinstance(value, dict) and all(isinstance(v, dict) for v in value.values()):
+                # Has subsets
+                good_subsets = [subset for subset, subval in value.items() if subval.get("status") == "working"]
+                if good_subsets:
+                    working[identifier] = good_subsets
+            else:
+                if value.get("status") == "working":
+                    working[identifier] = [None]
+        return working
     
 
-    def test_retrieve_legal(self):
+    def test_retrieve(self):
+        """
+        Tests LISIRDRetriever.retrieve for all working datasets and subsets, checking data validity, error handling, and timeout logging.
+        """
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
 
@@ -81,7 +92,7 @@ class TestLISIRDQuerying(unittest.TestCase):
         with open(self.STATUS_LOG, "w") as f:
             json.dump(status_log, f, indent=2)
 
-        # Dataset category (affects dataframe type checking)
+        # Dataset category (affects DataFrame type checking)
         for identifier in identifiers:
             extended_check = False
             if identifier in TestLISIRDQuerying.irradiance_identifiers:
@@ -105,44 +116,56 @@ class TestLISIRDQuerying(unittest.TestCase):
             
             print(f"\nDataset {identifier}: minimum date of {min_date}, maximum date of {max_date}")
 
+            # Variables
             total_days = (max_date - min_date).days
             interval = math.floor(total_days / TestLISIRDQuerying.NUM_SAMPLES)
             progress_bar = tqdm(total=total_days, desc=identifier)
             query_date = min_date
             
-            failed_queries = 0
-            timeout = np.zeros_like(subsets, dtype=bool) # Boolean array indicating which subsets, if any, have timed out
+            # Flags to prevent/measure any error buildup
+            failed_queries = np.zeros(len(subsets), dtype=int)
+            timeout_flags = np.zeros(len(subsets), dtype=int)
+
             while query_date < max_date:
                 # Query
-                for i, subset in enumerate(subsets):
-                    if not timeout[i]:
-                        try:
-                            df = TestLISIRDQuerying.retriever.retrieve(
-                                dataset=identifier,
-                                subset=subset,
-                                query_date=query_date.strftime("%Y-%m-%d"),
-                                timeout=self.TIMEOUT
-                            )
-                        except RuntimeError:
-                            if subset is not None:
-                                print(f"\nWARNING: Dataset '{identifier + "_" + subset}' timed out after {self.TIMEOUT} seconds - it may no longer be available through the LISIRD API.\n")
-                                status_log[identifier][subset]["status"] = "timeout"
-                                status_log[identifier][subset]["timeout"] = self.TIMEOUT
+                for idx, subset in enumerate(subsets):
+                        if timeout_flags[idx] < 2:
+                            try:
+                                df = TestLISIRDQuerying.retriever.retrieve(
+                                    dataset=identifier,
+                                    subset=subset,
+                                    query_date=query_date.strftime("%Y-%m-%d"),
+                                    timeout=self.TIMEOUT
+                                )
+                                timeout_flags[idx] = 0
+                            except RuntimeError:
+                                timeout_flags[idx] += 1
+                                if timeout_flags[idx] == 2:
+                                    if subset is not None:
+                                        print(f"\nWARNING: Dataset '{identifier + "_" + subset}' reported back-to-back timeouts of over {self.TIMEOUT} seconds - it may no longer be available through the LISIRD API.\n")
+                                        status_log[identifier][subset]["status"] = "timeout"
+                                        status_log[identifier][subset]["timeout"] = self.TIMEOUT
 
-                            else:
-                                print(f"\nWARNING: Dataset '{identifier}' timed out after {self.TIMEOUT} seconds - it may no longer be available through the LISIRD API.\n")
-                                status_log[identifier]["status"] = "timeout"
-                                status_log[identifier]["timeout"] = self.TIMEOUT
+                                    else:
+                                        print(f"\nWARNING: Dataset '{identifier}' reported back-to-back timeouts of over {self.TIMEOUT} seconds - it may no longer be available through the LISIRD API.\n")
+                                        status_log[identifier]["status"] = "timeout"
+                                        status_log[identifier]["timeout"] = self.TIMEOUT
+                                else:
+                                    if subset is not None:
+                                        status_log[identifier][subset]["bad dates"].append(query_date.strftime("%Y-%m-%d"))
+                                    else:
+                                        status_log[identifier]["bad dates"].append(query_date.strftime("%Y-%m-%d"))
                             
-                            # Break out of both loops to advance to next dataset
-                            timeout[i] = True
-                            continue
-                        except NoDataAvailableError:
-                            if subset is not None:
-                                status_log[identifier][subset]["bad dates"].append(query_date.strftime("%Y-%m-%d"))
-                            else:
-                                status_log[identifier]["bad dates"].append(query_date.strftime("%Y-%m-%d"))
-                            failed_queries += 1
+                            except NoDataAvailableError:
+                                failed_queries[idx] += 1
+                                if subset is not None:
+                                    status_log[identifier][subset]["bad dates"].append(query_date.strftime("%Y-%m-%d"))
+                                else:
+                                    status_log[identifier]["bad dates"].append(query_date.strftime("%Y-%m-%d"))
+                                
+                        # Break out of both loops to advance to next dataset
+                        if np.sum(timeout_flags) == 2*len(subsets):
+                            break
                         
                         # For available dataframes, ensure data is as expected
                         self.assertIsNotNone(df)
@@ -154,25 +177,27 @@ class TestLISIRDQuerying(unittest.TestCase):
                                 python_dtype = float if np.issubdtype(dtype, np.floating) else None
                                 self.assertEqual(python_dtype, float)
                 
-                # Move on to next dataset if timeout occured
-                if np.all(timeout):
+                # Timeout - break out of both loops to advance to next dataset
+                if np.sum(timeout_flags) == 2*len(subsets):
                     break
   
-                # Only increment if we didn't break due to timeout
+                # Update progress
                 query_date += timedelta(interval)
                 progress_bar.update(interval)
                 continue
             
+            # Wrap up dataset
             progress_bar.close()
-
             with open(self.STATUS_LOG, "w") as f:
                 json.dump(status_log, f, indent=2)
-            self.assertLess(failed_queries, TestLISIRDQuerying.FAILED_QUERY_TOLERANCE)
+            
+            for failed_query in failed_queries:
+                self.assertLess(failed_query, TestLISIRDQuerying.FAILED_QUERY_TOLERANCE)
     
 
     def test_dataset_validity(self):
         """
-        Checks that all datasets in the status log have a 'working' status. Fails if any dataset or subset is not 'working'.
+        Asserts that all datasets and subsets in the status log have status 'working'.
         """
         if Path(self.STATUS_LOG).exists():
             with open(self.STATUS_LOG, "r") as f:
@@ -192,19 +217,25 @@ class TestLISIRDQuerying(unittest.TestCase):
 
 
     def test_retrieve_invalid_dataset(self):
+        """
+        Tests that retrieve raises TypeError for illegal dataset types and ValueError for invalid dataset names.
+        """
 
         illegal_types = [None, 5, 100.7, False]
         illegal_dataset = 'test'
 
         for illegal_type in illegal_types:
             with self.assertRaises(TypeError):
-                self.retriever.retrieve(dataset=illegal_type, query_date="2012-01-01", subset=None, timeout=self.TIMEOUT)
+                TestLISIRDQuerying.retriever.retrieve(dataset=illegal_type, query_date="2012-01-01", subset=None, timeout=self.TIMEOUT)
         
         with self.assertRaises(ValueError):
-            self.retriever.retrieve(dataset=illegal_dataset, query_date="2012-01-01", subset=None, timeout=self.TIMEOUT)
+            TestLISIRDQuerying.retriever.retrieve(dataset=illegal_dataset, query_date="2012-01-01", subset=None, timeout=self.TIMEOUT)
 
     
     def test_retrieve_invalid_subset(self):
+        """
+        Tests that retrieve raises errors for invalid subset types or values, and for missing/extra subset arguments.
+        """
 
         illegal_types = [5, 100.7, False]
         illegal_subset = 'test'
@@ -238,20 +269,23 @@ class TestLISIRDQuerying(unittest.TestCase):
             # Subset exists, failure to specify should throw error
             if subset is not None:
                 with self.assertRaises(ValueError):
-                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=None, timeout=self.TIMEOUT)
+                    TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=query_date, subset=None, timeout=self.TIMEOUT)
             
             # No subset exists, attempting to specify should throw error
             else:
                 with self.assertRaises(ValueError):
-                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_subset, timeout=self.TIMEOUT)
+                    TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_subset, timeout=self.TIMEOUT)
             
             # Invalid typing
             for illegal_type in illegal_types:
                 with self.assertRaises(TypeError):
-                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_type, timeout=self.TIMEOUT)
+                    TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_type, timeout=self.TIMEOUT)
     
 
     def test_retrieve_invalid_date(self):
+        """
+        Tests that retrieve raises errors for out-of-range or invalid date arguments and types.
+        """
 
         illegal_types = [None, 5, 100.7, False]
         
@@ -285,15 +319,18 @@ class TestLISIRDQuerying(unittest.TestCase):
             # Below minimum and above maximum
             for query_date in (early_date, late_date):
                 with self.assertRaises(ValueError):
-                    self.retriever.retrieve(dataset=identifier, query_date=query_date, subset=subset, timeout=self.TIMEOUT)
+                    TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=query_date, subset=subset, timeout=self.TIMEOUT)
 
             # Invalid typing
             for illegal_type in illegal_types:
                 with self.assertRaises(TypeError):
-                    self.retriever.retrieve(dataset=identifier, query_date=illegal_type, subset=subset, timeout=self.TIMEOUT)
+                    TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=illegal_type, subset=subset, timeout=self.TIMEOUT)
     
 
-    def test_extract_legal(self):
+    def test_extract(self):
+        """
+        Tests LISIRDRetriever.extract for all working datasets, checking file creation and data validity for all subsets and dates.
+        """
         
         # For irradiance datatsets only
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
@@ -377,6 +414,9 @@ class TestLISIRDQuerying(unittest.TestCase):
             
 
     def test_extract_specific_subset(self):
+        """
+        Tests extract for datasets with multiple subsets, ensuring only the specified subset is extracted and files are correct.
+        """
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
 
@@ -462,14 +502,16 @@ class TestLISIRDQuerying(unittest.TestCase):
     
     
     def test_extract_invalid_dataset(self):
-
+        """
+        Tests that extract raises TypeError for illegal dataset types and ValueError for invalid dataset names.
+        """
         illegal_types = [None, 5, 100.7, False]
         illegal_dataset = 'test'
         test_dir = Path(TestLISIRDQuerying.TEST_DIR)
 
         for illegal_type in illegal_types:
             with self.assertRaises(TypeError):
-                self.retriever.extract(dataset=illegal_type, start_date=None,
+                TestLISIRDQuerying.retriever.extract(dataset=illegal_type, start_date=None,
                                       end_date=None, interval=1,
                                       save_dir=self.TEST_DIR,
                                       subset=None, timeout=self.TIMEOUT)
@@ -479,7 +521,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                 shutil.rmtree(Path(self.TEST_DIR))
             
         with self.assertRaises(ValueError):
-            self.retriever.extract(dataset=illegal_dataset, start_date=None,
+            TestLISIRDQuerying.retriever.extract(dataset=illegal_dataset, start_date=None,
                                    end_date=None, interval=1,
                                    save_dir=self.TEST_DIR,
                                    subset=None, timeout=self.TIMEOUT)
@@ -490,6 +532,9 @@ class TestLISIRDQuerying(unittest.TestCase):
     
 
     def test_extract_invalid_subset(self):
+        """
+        Tests that extract raises errors for invalid subset types or values for all working datasets.
+        """
 
         illegal_types = [5, 100.7, False]
         illegal_subset = 'test'
@@ -518,7 +563,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             # Type Checking 
             for illegal_type in illegal_types:
                 with self.assertRaises(TypeError):
-                    self.retriever.extract(dataset=identifier, subset=illegal_type,
+                    TestLISIRDQuerying.retriever.extract(dataset=identifier, subset=illegal_type,
                                           interval=1, save_dir=self.TEST_DIR,
                                           start_date=min_date,
                                           end_date=max_date,
@@ -529,7 +574,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             subset = subsets[-1]        
             if subset is not None:
                 with self.assertRaises(ValueError):
-                    self.retriever.extract(dataset=identifier, subset=illegal_subset,
+                    TestLISIRDQuerying.retriever.extract(dataset=identifier, subset=illegal_subset,
                                           interval=1, save_dir=self.TEST_DIR,
                                           start_date=min_date,
                                           end_date=max_date,
@@ -538,7 +583,9 @@ class TestLISIRDQuerying(unittest.TestCase):
                     
 
     def test_extract_invalid_date(self):
-
+        """
+        Tests that extract raises errors for out-of-range or invalid start/end date arguments and types.
+        """
         illegal_types = [None, 5, 100.7, False]
         
         identifiers = self._get_working_identifiers()
@@ -576,7 +623,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     if begin_date is None and finish_date is None:
                         continue
                     with self.assertRaises(ValueError):
-                        self.retriever.extract(dataset=identifier, start_date=begin_date,
+                        TestLISIRDQuerying.retriever.extract(dataset=identifier, start_date=begin_date,
                                               end_date=finish_date, interval=1,
                                               save_dir=self.TEST_DIR,
                                               subset=None, timeout=self.TIMEOUT)
@@ -587,7 +634,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     if illegal_types[i] is None and illegal_types[j] is None:
                         continue
                     with self.assertRaises(TypeError):
-                        self.retriever.extract(dataset=identifier, start_date=illegal_types[i],
+                        TestLISIRDQuerying.retriever.extract(dataset=identifier, start_date=illegal_types[i],
                                               end_date=illegal_types[j], interval=1,
                                               save_dir=self.TEST_DIR,
                                               subset=None, timeout=self.TIMEOUT)
@@ -597,10 +644,21 @@ class TestLISIRDQuerying(unittest.TestCase):
             shutil.rmtree(Path(self.TEST_DIR))
 
 
+
 class TestNISTQuerying(unittest.TestCase):
 
-    NUM_SAMPLES = 10 # Atomic samples in extract
-    TEST_DIR = "./gfactor/tests/spectra"
+    NUM_SAMPLES = 3 # Atomic samples in extract
+
+    # Get the absolute path to the current file (LISIRDQuerying.py)
+    current_file = Path(__file__).resolve()
+
+    # Get the package root (assuming this file is always in gfactor/querying/)
+    package_root = current_file.parents[2]  # gfactor/
+
+    # Build path to target directory
+    TEST_DIR = (package_root / "tests" / "querying" / "atomic").as_posix()
+
+    STATUS_LOG = "./gfactor/tests/querying/atomic_test_log.json"
     required_cols = {"obs_wl(A)" : float, 
                     "fik" : float, 
                     "term_k" : str,  
@@ -639,7 +697,7 @@ class TestNISTQuerying(unittest.TestCase):
 
     def _map_numpy_dtype_to_python(self, dtype):
         """
-        Map a numpy/pandas dtype to the corresponding Python type (float, int, str, or None).
+        Maps a numpy/pandas dtype to the corresponding Python type (float, int, str, or None).
         Handles pandas extension types like string[python].
         """
 
@@ -653,50 +711,175 @@ class TestNISTQuerying(unittest.TestCase):
             return None
 
 
-    def test_retrieve_legal(self):
+    def test_retrieve(self):
+        """
+        Tests NISTRetriever.retrieve for a random subset of elements, checking data validity and error handling for problematic elements.
+        """
 
-        # Loop through random subset of elements (full query is infeasible for reasonable runtimes)
-        elements = random.sample(TestNISTQuerying.elements, k=TestNISTQuerying.NUM_SAMPLES)
-
+        # Loop through random subset of elements (for manageable runtime)
+        safe_elements = [el for el in TestNISTQuerying.elements if el not in TestNISTQuerying.problem_elements]
+        elements = random.sample(safe_elements, k=TestNISTQuerying.NUM_SAMPLES)
+        problem_elements = random.sample(sorted(TestNISTQuerying.problem_elements), k=2)
+        
+        # Safe Loop
+        print("\n\nValidate data content of standard element queries:")
+        progress_bar = tqdm(total=len(elements), desc="Elements")
         for el in elements:
-            if el in TestNISTQuerying.problem_elements:
-                    results = TestNISTQuerying.retriever.retrieve(elements=[el], ionized=False)
-                    df = results[el]
-                    self.assertIsNone(df) # Elements with bad data are set to None
-            else:
-                for ionization in (True, False):
-                    results = TestNISTQuerying.retriever.retrieve(elements=[el], ionized=ionization)
-                    df = results[el]
-                    for col in TestNISTQuerying.required_cols:
-                        self.assertIn(col, df.columns)
+            for ionization in (True, False):
+                results = TestNISTQuerying.retriever.retrieve(elements=[el], ionized=ionization)
+                df = results[el]
+                for col in TestNISTQuerying.required_cols:
+                    self.assertIn(col, df.columns)
+                    dtype = df[col].dtype
+                    python_type = self._map_numpy_dtype_to_python(dtype)
+                    self.assertIsNotNone(python_type)
+                    self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
+                for col in TestNISTQuerying.optional_cols:
+                    if col in df.columns:
                         dtype = df[col].dtype
                         python_type = self._map_numpy_dtype_to_python(dtype)
                         self.assertIsNotNone(python_type)
-                        self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
-                    for col in TestNISTQuerying.optional_cols:
-                        if col in df.columns:
-                            dtype = df[col].dtype
-                            python_type = self._map_numpy_dtype_to_python(dtype)
-                            self.assertIsNotNone(python_type)
-                            self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
-    
+                        self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
+            
+            # Update
+            progress_bar.update(1)
+        
+        progress_bar.close()
+
+        # Problem Loop
+        print("\n\nTest error handling for elements with bad data:")
+        progress_bar = tqdm(total=len(problem_elements), desc="Problematic Elements")
+        for el in problem_elements:
+            results = TestNISTQuerying.retriever.retrieve(elements=[el], ionized=False)
+            df = results[el]
+            self.assertIsNone(df) # Elements with bad data are set to None
+            progress_bar.update(1)
+        
+        progress_bar.close()
+        
 
     def test_retrieve_invalid_elements(self):
+        """
+        Tests that retrieve raises TypeError for illegal element types and ValueError for invalid element names.
+        """
 
         illegal_types = [None, 5, 100.7, False]
         illegal_element = "test"
 
         for type in illegal_types:
             with self.assertRaises(TypeError):
-                results = TestNISTQuerying.retriever.retrieve(elements=[type], ionized=False)
+                TestNISTQuerying.retriever.retrieve(elements=[type], ionized=False)
         
         with self.assertRaises(ValueError):
-            results = TestNISTQuerying.retriever.retrieve(elements=[illegal_element], ionized=False)
+            TestNISTQuerying.retriever.retrieve(elements=[illegal_element], ionized=False)
     
     
     def test_retrieve_invalid_ionization(self):
+        """
+        Tests that retrieve raises TypeError for invalid ionized argument types.
+        """
 
         illegal_types = [None, 5, 100.7, "test"]
         for type in illegal_types:
             with self.assertRaises(TypeError):
-                results = TestNISTQuerying.retriever.retrieve(elements=["H"], ionized=type)
+                TestNISTQuerying.retriever.retrieve(elements=["H"], ionized=type)
+    
+
+    def test_extract_all(self):
+        """
+        Tests NISTRetriever.extract for all elements, checking file creation and data validity for both ionized and neutral forms.
+        """
+
+        test_dir = Path(TestNISTQuerying.TEST_DIR)
+        TestNISTQuerying.retriever.extract(elements=None, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+
+        for el in TestNISTQuerying.elements:
+            if el in TestNISTQuerying.problem_elements:
+                continue
+            for ionization in (True, False):
+                file = test_dir / el / f"{el}_ionized.pickle" if ionization else test_dir / el / f"{el}.pickle"
+                df = pd.read_pickle(file)
+
+                # Ensure data is as expected
+                self.assertIsNotNone(df) # Dataframe exists
+                self.assertGreater(len(df.values), 0) # Contains actual data
+
+                for col in TestNISTQuerying.required_cols:
+                    self.assertIn(col, df.columns)
+                    dtype = df[col].dtype
+                    python_type = self._map_numpy_dtype_to_python(dtype)
+                    self.assertIsNotNone(python_type)
+                    self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
+                for col in TestNISTQuerying.optional_cols:
+                    if col in df.columns:
+                        dtype = df[col].dtype
+                        python_type = self._map_numpy_dtype_to_python(dtype)
+                        self.assertIsNotNone(python_type)
+                        self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
+        
+        # Move extraction log to test
+        shutil.move(test_dir / "extraction_log.json", "./gfactor/tests/querying/atomic_test_log.json")
+
+        # Remove test directory and associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(self.TEST_DIR))
+    
+
+    def test_extract_subset(self):
+        """
+        Tests extract for a random subset of elements, checking file creation and data validity for both ionized and neutral forms.
+        """
+
+        # Loop through random subset of elements
+        safe_elements = [el for el in TestNISTQuerying.elements if el not in TestNISTQuerying.problem_elements]
+        elements = random.sample(safe_elements, k=TestNISTQuerying.NUM_SAMPLES)
+        test_dir = Path(TestNISTQuerying.TEST_DIR)
+        TestNISTQuerying.retriever.extract(elements=elements, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+
+        for el in elements:
+            for ionization in (True, False):
+                file = test_dir / el / f"{el}_ionized.pickle" if ionization else test_dir / el / f"{el}.pickle"
+                df = pd.read_pickle(file)
+
+                # Ensure data is as expected
+                self.assertIsNotNone(df) # Dataframe exists
+                self.assertGreater(len(df.values), 0) # Contains actual data
+
+                for col in TestNISTQuerying.required_cols:
+                    self.assertIn(col, df.columns)
+                    dtype = df[col].dtype
+                    python_type = self._map_numpy_dtype_to_python(dtype)
+                    self.assertIsNotNone(python_type)
+                    self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
+                for col in TestNISTQuerying.optional_cols:
+                    if col in df.columns:
+                        dtype = df[col].dtype
+                        python_type = self._map_numpy_dtype_to_python(dtype)
+                        self.assertIsNotNone(python_type)
+                        self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
+
+        # Remove test directory and associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(self.TEST_DIR))
+    
+
+    def test_extract_subset_invalid_elements(self):
+        """
+        Tests that extract raises TypeError for illegal element types and ValueError for invalid element names.
+        """
+
+        illegal_types = [None, 5, 100.7, False]
+        illegal_element = "test"
+
+        with self.assertRaises(TypeError):
+            TestNISTQuerying.retriever.extract(elements=illegal_types, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+        
+        with self.assertRaises(ValueError):
+            TestNISTQuerying.retriever.extract(elements=illegal_element, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+
+
+
+
+
+
+

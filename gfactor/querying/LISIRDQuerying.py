@@ -325,7 +325,7 @@ class LISIRDRetriever():
         
         # Ensure target date is within the bounds
         if query_date < min_date or query_date > max_date:
-            raise ValueError("Chosen date is out of bounds: must fall between " + min_date.strftime("%Y-%m-%d") +
+            raise ValueError(f"Chosen date of {query_date.strftime("%Y-%m-%d")} is out of bounds: must fall between " + min_date.strftime("%Y-%m-%d") +
                              " and " + max_date.strftime("%Y-%m-%d"))
         
         try:
@@ -351,8 +351,8 @@ class LISIRDRetriever():
         return df
     
 
-    def extract(self, dataset: str = "NNL", subset: str = None, start_date: str = None, end_date: str = None, 
-                timeout=10, interval: int = 1, save_dir: str = "../data/spectra", overwrite: bool = False):
+    def extract(self, save_dir: str, dataset: str = "NNL", subset: str = None, start_date: str = None, 
+                end_date: str = None, timeout=10, interval: int = 1, overwrite: bool = False):
         """
         Extracts spectral data for a given dataset and saves it locally.
 
@@ -514,6 +514,10 @@ class LISIRDRetriever():
         progress_bar = tqdm(total=total_days, desc="Querying")
         progress_bar.update((start_date - default_start_date).days) # Indicate progress relative to min date
         
+        # Flags to indicate early termination in case errors build up
+        timeout_flags = [0]*len(subsets) # Maximum of 2 consecutive, per subset
+        no_data_flags = [0]*len(subsets) # Maximum of 5 consecutive, per subset
+
         # Query loop
         while query_date <= end_date:
 
@@ -533,7 +537,7 @@ class LISIRDRetriever():
             
             # Subset loop
             data = {}
-            for sub in subsets:
+            for idx, sub in enumerate(subsets):
                 try:
                     data[sub] = self.retrieve(dataset=dataset, subset=sub, 
                                                 query_date=query_date.strftime("%Y-%m-%d"), timeout=timeout)
@@ -543,9 +547,16 @@ class LISIRDRetriever():
                         status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                     with open (log_dir, "w") as f:
                         json.dump(status_log, f, indent=2)
+                    
+                    timeout_flags[idx] = 0
+                    no_data_flags[idx] = 0
 
                 # Indicates dataset is offline or unavailable
-                except (RuntimeError, NoDataAvailableError) as e:  
+                except (RuntimeError, NoDataAvailableError) as e:
+                    if isinstance(e, RuntimeError):
+                        timeout_flags[idx] += 1
+                    else:
+                        no_data_flags[idx] += 1
                     if sub is not None:
                         status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), f"{e}"))
                         status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
@@ -572,9 +583,16 @@ class LISIRDRetriever():
                             status_log[dataset]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
                         with open (log_dir, "w") as f:
                             json.dump(status_log, f, indent=2)
+                        
+                        timeout_flags[idx] = 0
+                        no_data_flags[idx] = 0
 
                     # Back-to-back failures isn't a coincidence        
                     except (RuntimeError, requests.exceptions.RequestException, NoDataAvailableError) as e: 
+                        if isinstance(e, RuntimeError):
+                            timeout_flags[idx] += 1
+                        elif isinstance(e, NoDataAvailableError):
+                            no_data_flags[idx] += 1
                         if sub is not None:
                             status_log[dataset][sub]["bad_dates"].append((query_date.strftime("%Y-%m-%d"), e))
                             status_log[dataset][sub]["last_date_queried"] = query_date.strftime("%Y-%m-%d")
@@ -586,6 +604,16 @@ class LISIRDRetriever():
                         query_date += timedelta(interval)
                         progress_bar.update(1)
                         continue
+            
+                # Exit if back-to-back timeouts
+                if timeout_flags[idx] == 2:
+                    raise TimeoutError(f"dataset '{dataset}', subset {sub} timed out on back-to-back queries: this dataset may currently be offline or unavailable, or else could be missing a stretch of consecutive data."
+                                       f"\nIn the case of missing stretches of data, try setting 'interval' >> 1."
+                                       f"\nYou can check data availability on LISIRD at https://lasp.colorado.edu/lisird/. In some cases, data may appear to be available on LISIRD, but is no longer accessible through the API.")
+                elif no_data_flags[idx] == 5:
+                    raise NoDataAvailableError(f"dataset '{dataset}', subset {sub} returned no data for 5 consecutive queries: this dataset may currently be offline or unavailable, or else may be missing a stretch of consecutive data."
+                                       f"\nIn the case of missing stretches of data, try setting 'interval' >> 1."
+                                       f"\nYou can check data availability on LISIRD at https://lasp.colorado.edu/lisird/. In some cases, data may appear to be available on LISIRD, but is no longer accessible through the API.")
 
             # Save dataframes
             for sub in list(data.keys()):
@@ -598,6 +626,17 @@ class LISIRDRetriever():
     
  
 def parse_args():
+        
+        # Get the absolute path to the current file (LISIRDQuerying.py)
+        current_file = Path(__file__).resolve()
+
+        # Get the package root (assuming this file is always in gfactor/querying/)
+        package_root = current_file.parents[2]  # gfactor/
+
+        # Build path to target directory
+        spectra_dir = (package_root / "data" / "spectra").as_posix()
+        
+
         p = argparse.ArgumentParser("Extract spectral data from LISIRD")
         p.add_argument("--dataset", '-ds', type=str, default="nnl",
                        help="LISIRD dataset to query from")
@@ -611,7 +650,7 @@ def parse_args():
                        help="End date for querying, in 'YYYY-MM-DD' format")
         p.add_argument("--timeout", "-t", type=int, default=10,
                        help="Time (in seconds) allowed for request to process before forcing timeout")
-        p.add_argument("--save-dir", '-save', type=str, default="./data/spectra",
+        p.add_argument("--save-dir", '-save', type=str, default=spectra_dir,
                     help="Save directory for spectral pickle files")
         p.add_argument("--overwrite", "-o", type=bool, default=False,
                     help="Forcibly ovewrite existing files if true")

@@ -15,6 +15,10 @@ import pandas as pd
 import numpy as np
 import json
 
+class NoDataAvailableError(Exception):
+    """Raised when a query is valid but no data is available for the requested parameters."""
+    pass
+
 class NISTRetriever:
     
     """
@@ -221,7 +225,7 @@ class NISTRetriever:
         missing_wavelengths = [col for col in wavelength_cols if col not in df.columns]
         
         if len(df) == 0 or len(missing_cores) > 0 or len(missing_wavelengths) == 2:
-            raise ValueError(f"No data available for element '{element}'")
+            raise NoDataAvailableError(f"No data available for element '{element}'")
         
         # Bring all wavelength data under the same header
         if "obs_wl_air(A)" in df.columns:
@@ -335,12 +339,12 @@ class NISTRetriever:
         return dataframes
 
 
-    def extract(self, save_dir:str = "../data/atomic", overwrite=False):
+    def extract(self, elements:List[str] = None, save_dir:str = "../data/atomic", overwrite=False):
 
         """
-        Sweeps through 'elements_by_mass' object dictionary, querying all available
-        elements 1-by-1, and saving both non-ionized and ionized transition CSV files to
-        the chosen directory.
+        By default sweeps through 'elements_by_mass' object dictionary, querying all available
+        elements 1-by-1 and saving both non-ionized and ionized transition CSV files to
+        the chosen directory. If 'elements' is provided, then saves to the 
 
         Parameters
         ----------
@@ -361,14 +365,23 @@ class NISTRetriever:
         dir.mkdir(parents=True, exist_ok=True)
 
         # Elements List
-        elements = list(self.elements_by_mass.keys())
+        if elements:
+            for el in elements:
+                if not isinstance(el, str):
+                    raise TypeError(f"Expected 'elements' to contain items of type 'str', found type '{type(el)}' instead.")
+
+                # Confirm element data available
+                if el not in self.elements_by_mass:
+                    raise ValueError(f"{el} is not a recognizeable element")
+        else:
+            elements = list(self.elements_by_mass.keys())
         elements.sort(key = lambda x: self.elements_by_mass[x])
 
         # Progress Bar
         progress_bar = tqdm(total=len(elements), desc="Querying")
 
         # Setup log file
-        log_dir = save_dir / "extraction_log.json"
+        log_dir = dir / "extraction_log.json"
         if Path(log_dir).exists():
             with open(log_dir, "r") as f:
                 status_log = json.load(f)
@@ -377,6 +390,9 @@ class NISTRetriever:
 
         # Loop through all elements
         for el in elements:
+
+            path = dir / el
+            path.mkdir(parents=True, exist_ok=True)
             
             # Default for status log, if necessary
             if overwrite or el not in status_log:
@@ -384,23 +400,23 @@ class NISTRetriever:
 
             for ionization in (False, True):
                 status = "available"
-                path = dir / f"{el}_ionized.pickle" if ionization else dir / f"{el}.pickle"
+                file = dir / el / f"{el}_ionized.pickle" if ionization else dir / el / f"{el}.pickle"
 
                 # Move on to next element if data already exists 
-                if path.exists() and not overwrite:
+                if file.exists() and not overwrite:
                     break
                 
                 # Retrieval
                 try:
                     results = self.retrieve(elements=[el], ionized=ionization)
                     df = results[el]
-                    pd.to_pickle(df, path)
+                    pd.to_pickle(df, file)
                     # Request processes, but no data available
                     if df is None:
                         status = "bad data"
 
-                # Results for this element are offline
-                except requests.exceptions.Timeout:
+                # Results for this element are offline or unavailable
+                except (requests.exceptions.Timeout, NoDataAvailableError):
                     status = "unavailable"
 
                 # Sometimes SSL closes connections which have been open for too long: try one more time
@@ -413,20 +429,21 @@ class NISTRetriever:
                         try:
                             results = self.retrieve(elements=[el], ionized=ionization)
                             df = results[el]
-                            pd.to_pickle(df, path)
+                            pd.to_pickle(df, file)
                             # Request processes, but no data available
                             if df is None:
                                 status = "bad data"
+                        
+                        # Results for this element are offline or unavailable
+                        except (requests.exceptions.Timeout, NoDataAvailableError, requests.exceptions.RequestException):
+                            status = "unavailable"
 
-                        # Back-to-back failures isn't a coincidence 
-                        except requests.exceptions.RequestException:
-                               status = "unavailable"
-
+                            
                 # Write to log file
                 if ionization:
-                    status_log['Element']["Ionized"] = {"status":status}
+                    status_log[el]["ionized"] = {"status":status}
                 else:
-                    status_log['Element']["Standard"] = {"status":status}
+                    status_log[el]["standard"] = {"status":status}
                 
                 # Write error data to JSON file
                 with open(log_dir, "w") as f:
@@ -439,11 +456,20 @@ class NISTRetriever:
         
 
 def parse_args():
+        
+        # Get the absolute path to the current file (LISIRDQuerying.py)
+        current_file = Path(__file__).resolve()
+
+        # Get the package root (assuming this file is always in gfactor/querying/)
+        package_root = current_file.parents[2]  # gfactor/
+
+        # Build path to target directory
+        atomic_dir = (package_root / "data" / "atomic").as_posix()
+
         p = argparse.ArgumentParser("Extract Atomic Species Data from NIST Atomic Spectral Database")
-        p.add_argument("--save-dir", '-sd', type=str, default="./data/atomic",
+        p.add_argument("--elements", '-e', type=List[str], default=None, help="list of specific elements to extract")
+        p.add_argument("--save-dir", '-sd', type=str, default=atomic_dir,
                     help="Save directory for elemental csv files")
-        p.add_argument("--error-dir", '-ed', type=str, default="./data/errors",
-                       help="Logs errors with specific queries, if any")
         p.add_argument("--overwrite", "-o", type=bool, default=True,
                        help="Forcibly ovewrite existing files if true")
         
@@ -453,8 +479,8 @@ def parse_args():
 def main():
     args = parse_args()
     retriever = NISTRetriever()
-    retriever.extract(save_dir=args.save_dir,
-                      error_dir = args.error_dir,
+    retriever.extract(elements=['H', 'C', 'O', 'S'],
+                      save_dir=args.save_dir,
                       overwrite=args.overwrite)
       
 
