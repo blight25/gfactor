@@ -1,24 +1,15 @@
 import unittest
 from datetime import date, timedelta
 from astropy import units as u
-
 import time
 from datetime import date, timedelta
-
 import shutil
-
 from tqdm import tqdm
-
 import math
-
 import json
-
 from pathlib import Path
-
 import astropy.units as u
-
 from gfactor.querying.LISIRDQuerying import LISIRDRetriever
-
 import numpy as np
 
 # Local imports
@@ -53,6 +44,8 @@ class TestSolar(unittest.TestCase):
         Returns a dictionary of dataset identifiers and their working subsets based on the status log.
         Only includes those marked as 'working'.
         """
+
+        # Get status log from query testing
         if Path(self.STATUS_LOG).exists():
             with open(self.STATUS_LOG, "r") as f:
                 status_log = json.load(f)
@@ -85,14 +78,34 @@ class TestSolar(unittest.TestCase):
 
     def test_load_daily_new(self):
 
+        """Ensures that loading daily spectra by direct querying from LISIRD is functional, with properly
+        formatted data."""
+        
+        # Use established datasets (validated by query testing)
         identifiers = self._get_working_identifiers()
 
         print("Load Daily Spectrum (with Querying) Test")
         print(f"Number of samples per dataset: {TestSolar.NUM_SAMPLES}")
 
+        # Get status log from query testing 
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            raise FileNotFoundError(f"JSON status log for working datasets not found: please run 'test_retrieve' from 'test_querying.py' first.")
+
         for identifier in identifiers:
 
-            # Date initialization - these will always be replaced
+            # Find bad dates from query testing logs
+            subsets = identifiers[identifier]
+            if subsets[-1]:
+                bad_dates = set()
+                for subset in subsets:
+                    bad_dates.update(status_log[identifier][subset]["bad dates"])
+            else:
+                bad_dates = set(status_log[identifier]["bad dates"])
+
+            # Date initialization - these will always be replaced after examining subset date ranges
             min_date = date(year=1600, month=1, day=1)
             max_date = date(year=2100, month=1, day=1)
 
@@ -103,13 +116,26 @@ class TestSolar(unittest.TestCase):
             
             print(f"\nDataset {identifier}: minimum date of {min_date}, maximum date of {max_date}")
 
+            # Variables
             total_days = (max_date - min_date).days
             interval = math.floor(total_days / TestSolar.NUM_SAMPLES)
             progress_bar = tqdm(total=total_days, desc=identifier)
             query_date = min_date
+
+            # Query loop
             while query_date <= max_date:
+
+                # Skip any known bad dates (dates with faulty API resuls)
+                if query_date.strftime("%Y-%m-%d") in bad_dates:
+                    query_date += timedelta(interval)
+                    progress_bar.update(interval)
+                    continue
+                
+                # Function call
                 spectra = SolarSpectrum.daily_spectrum(date=query_date.strftime("%Y-%m-%d"), 
                                                   dataset=identifier)
+                
+                # Validate spectral data
                 for spectrum in spectra:
                     if spectrum:
                         self.assertIsInstance(spectrum, SolarSpectrum)
@@ -123,17 +149,38 @@ class TestSolar(unittest.TestCase):
     
     def test_load_daily(self):
 
-        # Date initialization - these will always be replaced
-        min_date = date(year=1600, month=1, day=1)
-        max_date = date(year=2100, month=1, day=1)
+        """Ensures that loading daily spectra by from pre-defined files is functional, with properly
+        formatted data."""
+        
+        # Use established datasets (validated by query testing)
+        identifiers = self._get_working_identifiers()
 
+         # Get status log from query testing 
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            raise FileNotFoundError(f"JSON status log for working datasets not found: please run 'test_retrieve' from 'test_querying.py' first.")
 
         # If a previous test directory exists, remove it and its associated files
         test_dir = Path(TestSolar.TEST_DIR)
         if test_dir.exists() and test_dir.is_dir():
             shutil.rmtree(Path(self.TEST_DIR))
 
+        # Date initialization - these will always be replaced
+        min_date = date(year=1600, month=1, day=1)
+        max_date = date(year=2100, month=1, day=1)
+
         for identifier in TestSolar.identifiers:
+
+           # Find bad dates from query testing logs
+            subsets = identifiers[identifier]
+            if subsets[-1]:
+                bad_dates = set()
+                for subset in subsets:
+                    bad_dates.update(status_log[identifier][subset]["bad dates"])
+            else:
+                bad_dates = set(status_log[identifier]["bad dates"])
 
             # Date initialization - these will always be replaced
             min_date = date(year=1600, month=1, day=1)
@@ -144,24 +191,36 @@ class TestSolar(unittest.TestCase):
                 min_date = max(min_date, TestSolar.retriever.irradiance_datasets[dataset]['min_date'])
                 max_date = min(max_date, TestSolar.retriever.irradiance_datasets[dataset]['max_date'])
 
+            # Variables
             total_days = (max_date - min_date).days
             interval = math.floor(total_days / TestSolar.NUM_SAMPLES)
 
+            # Have files on hand for testing file loading
             TestSolar.retriever.extract(dataset=identifier, 
                                         subset=None, 
                                         start_date=min_date.strftime("%Y-%m-%d"), 
                                         end_date=max_date.strftime("%Y-%m-%d"), 
                                         interval=interval,
                                         save_dir=TestSolar.TEST_DIR)
-        
+
+            # Query loop
             query_date = min_date
             while query_date <= max_date:
+
+                # Skip any known bad dates (dates with faulty API resuls)
+                if query_date.strftime("%Y-%m-%d") in bad_dates:
+                    query_date += timedelta(interval)
+                    continue
+                
+                # Timed function call
                 start_time = time.time()
                 spectra = SolarSpectrum.daily_spectrum(date=query_date.strftime("%Y-%m-%d"), dataset=identifier,
                                                           emissions=None, daily_dir=TestSolar.TEST_DIR)
                 end_time = time.time()
                 elapsed = (end_time - start_time)
                 self.assertLess(elapsed, .1) # For pulling from pre-loaded files, shouldn't take more than a few milliseconds
+
+                # Validate spectral data
                 for spectrum in spectra:
                     if spectrum:
                         self.assertIsInstance(spectrum, SolarSpectrum)
@@ -178,6 +237,7 @@ class TestSolar(unittest.TestCase):
 
 
     def test_spectral_overlap(self):
+
         sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
         nnl = SolarSpectrum.daily_spectrum(date="2020-09-15", dataset="NNL", res="high")
         sumer_overlap, nnl_overlap = SolarSpectrum.spectral_overlap(sumer, nnl)
@@ -197,6 +257,7 @@ class TestSolar(unittest.TestCase):
         resampled_sumer = SolarSpectrum.resample(sumer_overlap, new_axis = nnl_overlap.spectral_axis)
         self.assertEqual(len(resampled_sumer.spectral_axis), len(nnl_overlap.spectral_axis))
 
+
     def test_resample(self):
         try:
             sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
@@ -207,6 +268,7 @@ class TestSolar(unittest.TestCase):
             self.assertEqual(len(sumer_overlap.spectral_axis), len(nnl_overlap.spectral_axis))
         except ValueError:
             self.fail()
+
 
     def test_static_convolve(self):
         
@@ -251,7 +313,6 @@ class TestSolar(unittest.TestCase):
             self.assertTrue(True)
         except ValueError:
             self.fail()
-
 
 
     def test_feature_fit(self):

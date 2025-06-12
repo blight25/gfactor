@@ -63,9 +63,10 @@ class TestLISIRDQuerying(unittest.TestCase):
         return working
     
 
-    def test_retrieve(self):
+    def test_01_retrieve(self):
         """
-        Tests LISIRDRetriever.retrieve for all working datasets and subsets, checking data validity, error handling, and timeout logging.
+        Tests LISIRDRetriever.retrieve for all working datasets and subsets, checking data validity, 
+        error handling, and timeout logging.
         """
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
@@ -195,7 +196,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                 self.assertLess(failed_query, TestLISIRDQuerying.FAILED_QUERY_TOLERANCE)
     
 
-    def test_dataset_validity(self):
+    def test_02_dataset_validity(self):
         """
         Asserts that all datasets and subsets in the status log have status 'working'.
         """
@@ -216,7 +217,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                 self.assertEqual(status, "working", f"Dataset '{dataset}' has status '{status}' (expected 'working')")  
 
 
-    def test_retrieve_invalid_dataset(self):
+    def test_03_retrieve_invalid_dataset(self):
         """
         Tests that retrieve raises TypeError for illegal dataset types and ValueError for invalid dataset names.
         """
@@ -232,7 +233,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             TestLISIRDQuerying.retriever.retrieve(dataset=illegal_dataset, query_date="2012-01-01", subset=None, timeout=self.TIMEOUT)
 
     
-    def test_retrieve_invalid_subset(self):
+    def test_04_retrieve_invalid_subset(self):
         """
         Tests that retrieve raises errors for invalid subset types or values, and for missing/extra subset arguments.
         """
@@ -282,7 +283,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=query_date, subset=illegal_type, timeout=self.TIMEOUT)
     
 
-    def test_retrieve_invalid_date(self):
+    def test_05_retrieve_invalid_date(self):
         """
         Tests that retrieve raises errors for out-of-range or invalid date arguments and types.
         """
@@ -327,7 +328,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     TestLISIRDQuerying.retriever.retrieve(dataset=identifier, query_date=illegal_type, subset=subset, timeout=self.TIMEOUT)
     
 
-    def test_extract(self):
+    def test_06_extract(self):
         """
         Tests LISIRDRetriever.extract for all working datasets, checking file creation and data validity for all subsets and dates.
         """
@@ -446,10 +447,17 @@ class TestLISIRDQuerying(unittest.TestCase):
             shutil.rmtree(Path(TestLISIRDQuerying.TEST_DIR))
             
 
-    def test_extract_specific_subset(self):
+    def test_07_extract_specific_subset(self):
         """
         Tests extract for datasets with multiple subsets, ensuring only the specified subset is extracted and files are correct.
         """
+
+        # Load or initialize status log
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            raise FileNotFoundError(f"JSON status log for working datasets not found: please run 'test_retrieve' before any additional query testing is performed")
         
         test_dir = Path(TestLISIRDQuerying.TEST_DIR)
         # If a previous test directory exists, remove it and its associated files
@@ -485,10 +493,33 @@ class TestLISIRDQuerying(unittest.TestCase):
                     min_date = max(min_date, datasets[dataset]['min_date'])
                     max_date = min(max_date, datasets[dataset]['max_date'])
                 
+                # Find bad dates from retrieve testing
+                if subsets[-1]:
+                    bad_dates = set()
+                    for subset in subsets:
+                        bad_dates.update(status_log[identifier][subset]["bad dates"])
+                else:
+                    bad_dates = set(status_log[identifier]["bad dates"])
+                
+                # Avoid setting start to a faulty date
+                start_date = min_date
+                while True:
+                    if start_date.strftime("%Y-%m-%d") in bad_dates:
+                        start_date += timedelta(7)
+                    else:
+                        break
+                
+                # Avoid setting end to a faulty date
+                end_date = max_date
+                while True:
+                    if end_date.strftime("%Y-%m-%d") in bad_dates:
+                        end_date -= timedelta(7)
+                    else:
+                        break
+                
                 # Variables
-                interval = (max_date - min_date).days - 1
-                start_date = min_date.strftime("%Y-%m-%d")
-                end_date = min_date + timedelta(days=interval)
+                interval = (end_date - start_date).days
+                start_date = start_date.strftime("%Y-%m-%d")
                 end_date = end_date.strftime("%Y-%m-%d")
 
                 # Use first subset for testing
@@ -537,7 +568,7 @@ class TestLISIRDQuerying(unittest.TestCase):
             shutil.rmtree(Path(TestLISIRDQuerying.TEST_DIR))
     
     
-    def test_extract_invalid_dataset(self):
+    def test_08_extract_invalid_dataset(self):
         """
         Tests that extract raises TypeError for illegal dataset types and ValueError for invalid dataset names.
         """
@@ -571,7 +602,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                 shutil.rmtree(Path(self.TEST_DIR))
     
 
-    def test_extract_invalid_subset(self):
+    def test_09_extract_invalid_subset(self):
         """
         Tests that extract raises errors for invalid subset types or values for all working datasets.
         """
@@ -622,7 +653,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                                           timeout=self.TIMEOUT)
                     
 
-    def test_extract_invalid_date(self):
+    def test_10_extract_invalid_date(self):
         """
         Tests that extract raises errors for out-of-range or invalid start/end date arguments and types.
         """
@@ -754,7 +785,7 @@ class TestNISTQuerying(unittest.TestCase):
             return None
 
 
-    def test_retrieve(self):
+    def test_01_retrieve(self):
         """
         Tests NISTRetriever.retrieve for a random subset of elements, checking data validity and error handling for problematic elements.
         """
@@ -801,7 +832,7 @@ class TestNISTQuerying(unittest.TestCase):
         progress_bar.close()
         
 
-    def test_retrieve_invalid_elements(self):
+    def test_02_retrieve_invalid_elements(self):
         """
         Tests that retrieve raises TypeError for illegal element types and ValueError for invalid element names.
         """
@@ -817,7 +848,7 @@ class TestNISTQuerying(unittest.TestCase):
             TestNISTQuerying.retriever.retrieve(elements=[illegal_element], ionized=False)
     
     
-    def test_retrieve_invalid_ionization(self):
+    def test_03_retrieve_invalid_ionization(self):
         """
         Tests that retrieve raises TypeError for invalid ionized argument types.
         """
@@ -828,7 +859,60 @@ class TestNISTQuerying(unittest.TestCase):
                 TestNISTQuerying.retriever.retrieve(elements=["H"], ionized=type)
     
 
-    def test_extract_all(self):
+    def test_04_extract_subset(self):
+        """
+        Tests extract for a random subset of elements, checking file creation and data validity for both ionized and neutral forms.
+        """
+
+        # Loop through random subset of elements
+        safe_elements = [el for el in TestNISTQuerying.elements if el not in TestNISTQuerying.problem_elements]
+        elements = random.sample(safe_elements, k=TestNISTQuerying.NUM_SAMPLES)
+        test_dir = Path(TestNISTQuerying.TEST_DIR)
+        TestNISTQuerying.retriever.extract(elements=elements, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+
+        for el in elements:
+            for ionization in (True, False):
+                file = test_dir / el / f"{el}_ionized.pickle" if ionization else test_dir / el / f"{el}.pickle"
+                df = pd.read_pickle(file)
+
+                # Ensure data is as expected
+                self.assertIsNotNone(df) # Dataframe exists
+                self.assertGreater(len(df.values), 0) # Contains actual data
+
+                for col in TestNISTQuerying.required_cols:
+                    self.assertIn(col, df.columns)
+                    dtype = df[col].dtype
+                    python_type = self._map_numpy_dtype_to_python(dtype)
+                    self.assertIsNotNone(python_type)
+                    self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
+                for col in TestNISTQuerying.optional_cols:
+                    if col in df.columns:
+                        dtype = df[col].dtype
+                        python_type = self._map_numpy_dtype_to_python(dtype)
+                        self.assertIsNotNone(python_type)
+                        self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
+
+        # Remove test directory and associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(self.TEST_DIR))
+    
+
+    def test_05_extract_invalid_elements(self):
+            """
+            Tests that extract raises TypeError for illegal element types and ValueError for invalid element names.
+            """
+
+            illegal_types = [None, 5, 100.7, False]
+            illegal_element = "test"
+
+            with self.assertRaises(TypeError):
+                TestNISTQuerying.retriever.extract(elements=illegal_types, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+            
+            with self.assertRaises(ValueError):
+                TestNISTQuerying.retriever.extract(elements=illegal_element, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
+
+
+    def test_06_extract_all(self):
         """
         Tests NISTRetriever.extract for all elements, checking file creation and data validity for both ionized and neutral forms.
         """
@@ -868,58 +952,7 @@ class TestNISTQuerying(unittest.TestCase):
             shutil.rmtree(Path(self.TEST_DIR))
     
 
-    def test_extract_subset(self):
-        """
-        Tests extract for a random subset of elements, checking file creation and data validity for both ionized and neutral forms.
-        """
-
-        # Loop through random subset of elements
-        safe_elements = [el for el in TestNISTQuerying.elements if el not in TestNISTQuerying.problem_elements]
-        elements = random.sample(safe_elements, k=TestNISTQuerying.NUM_SAMPLES)
-        test_dir = Path(TestNISTQuerying.TEST_DIR)
-        TestNISTQuerying.retriever.extract(elements=elements, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
-
-        for el in elements:
-            for ionization in (True, False):
-                file = test_dir / el / f"{el}_ionized.pickle" if ionization else test_dir / el / f"{el}.pickle"
-                df = pd.read_pickle(file)
-
-                # Ensure data is as expected
-                self.assertIsNotNone(df) # Dataframe exists
-                self.assertGreater(len(df.values), 0) # Contains actual data
-
-                for col in TestNISTQuerying.required_cols:
-                    self.assertIn(col, df.columns)
-                    dtype = df[col].dtype
-                    python_type = self._map_numpy_dtype_to_python(dtype)
-                    self.assertIsNotNone(python_type)
-                    self.assertEqual(python_type, TestNISTQuerying.required_cols[col])
-                for col in TestNISTQuerying.optional_cols:
-                    if col in df.columns:
-                        dtype = df[col].dtype
-                        python_type = self._map_numpy_dtype_to_python(dtype)
-                        self.assertIsNotNone(python_type)
-                        self.assertEqual(python_type, TestNISTQuerying.optional_cols[col])
-
-        # Remove test directory and associated files
-        if test_dir.exists() and test_dir.is_dir():
-            shutil.rmtree(Path(self.TEST_DIR))
     
-
-    def test_extract_subset_invalid_elements(self):
-        """
-        Tests that extract raises TypeError for illegal element types and ValueError for invalid element names.
-        """
-
-        illegal_types = [None, 5, 100.7, False]
-        illegal_element = "test"
-
-        with self.assertRaises(TypeError):
-            TestNISTQuerying.retriever.extract(elements=illegal_types, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
-        
-        with self.assertRaises(ValueError):
-            TestNISTQuerying.retriever.extract(elements=illegal_element, save_dir=TestNISTQuerying.TEST_DIR, overwrite=True)
-
 
 
 
