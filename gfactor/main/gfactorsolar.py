@@ -243,13 +243,13 @@ class SolarSpectrum(Spectrum1D):
         available datasets are as follows (see descriptions from UC Boulder's 
         LISIRD: https://lasp.colorado.edu/lisird/):
 
-        1. {NNL: {high-res: https://lasp.colorado.edu/lisird/data/nnl_ssi_P1D}
-                 {low-res: https://lasp.colorado.edu/lisird/data/nnl_hires_ssi_P1D} }
+        1. {NNL: {high-res: 'https://lasp.colorado.edu/lisird/data/nnl_ssi_P1D'}
+                 {low-res: 'https://lasp.colorado.edu/lisird/data/nnl_hires_ssi_P1D'} }
 
-        2. {SORCE: {high-res: https://lasp.colorado.edu/lisird/data/sorce_solstice_ssi_high_res}
-                   {low-res: https://lasp.colorado.edu/lisird/data/sorce_ssi_l3} }       
+        2. {SORCE: {high-res: 'https://lasp.colorado.edu/lisird/data/sorce_solstice_ssi_high_res'}
+                   {low-res: 'https://lasp.colorado.edu/lisird/data/sorce_ssi_l3'} }       
                  
-        3. {TIMED: https://lasp.colorado.edu/lisird/data/timed_see_ssi_l3}
+        3. {TIMED: 'https://lasp.colorado.edu/lisird/data/timed_see_ssi_l3'}
 
         For spectra with both low and high resolution designations, both versions will be loaded
         and returned as tuple of SolarSpectrum objects (low-res, high-res): you can always
@@ -301,6 +301,8 @@ class SolarSpectrum(Spectrum1D):
                 data = pd.read_pickle(file)
             # Query 
             else:
+                if file:
+                    print(f"file {file} could not be found: querying from LISIRD directly")
                 data = SolarSpectrum.daily_retriever.retrieve(dataset=dataset,
                                                           subset=subset,
                                                           query_date=date,
@@ -1050,12 +1052,9 @@ if __name__ == "__main__":
 
     # Get the package root (assuming this file is always in gfactor/querying/)
     package_root = current_file.parents[2]  # gfactor/
-
+    
+    # Directory to load data from
     dir = (package_root / "data" / "spectra").as_posix()
 
     sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
-    start = time.time()
-    nnl = SolarSpectrum.daily_spectrum(date="2023-04-03", dataset="NNL", daily_dir=None)
-    end = time.time()
-    print(end - start)
-
+    nnl_low = SolarSpectrum.daily_spectrum(date="2023-04-03", dataset="NNL", daily_dir=None)

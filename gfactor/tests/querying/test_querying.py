@@ -28,7 +28,7 @@ class TestLISIRDQuerying(unittest.TestCase):
     # Get the absolute path to the current file (LISIRDQuerying.py)
     current_file = Path(__file__).resolve()
 
-    # Get the package root (assuming this file is always in gfactor/querying/)
+    # Get the package root
     package_root = current_file.parents[2]  # gfactor/
 
     # Build path to target directory
@@ -331,18 +331,33 @@ class TestLISIRDQuerying(unittest.TestCase):
         """
         Tests LISIRDRetriever.extract for all working datasets, checking file creation and data validity for all subsets and dates.
         """
-        
-        # For irradiance datatsets only
+
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
+
+        # Load or initialize status log
+        if Path(self.STATUS_LOG).exists():
+            with open(self.STATUS_LOG, "r") as f:
+                status_log = json.load(f)
+        else:
+            raise FileNotFoundError(f"JSON status log for working datasets not found: please run 'test_retrieve' before any additional query testing is performed")
+        
+        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
+        # If a previous test directory exists, remove it and its associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(TestLISIRDQuerying.TEST_DIR))
 
         # Dataset names and subsets
         identifiers = self._get_working_identifiers()
         all_identifiers = {**self.irradiance_identifiers, **self.other_identifiers}
 
-        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
-
         for identifier in identifiers:
+
+            # Ensure that this dataset and ALL of its subsets (if they exist) are operational before testing
+            subsets = identifiers[identifier]
+            if identifier not in all_identifiers or not len(subsets) == len(all_identifiers[identifier]):
+                            continue
             
+            # Irradiance or other
             extended_check = False
             if identifier in TestLISIRDQuerying.irradiance_identifiers:
                 datasets = TestLISIRDQuerying.retriever.irradiance_datasets
@@ -351,26 +366,44 @@ class TestLISIRDQuerying(unittest.TestCase):
             elif identifier in TestLISIRDQuerying.other_identifiers:
                 datasets = TestLISIRDQuerying.retriever.other_datasets
             
+
             # Date initialization - these will always be replaced once actual dates are located
             min_date = date(year=1600, month=1, day=1)
             max_date = date(year=2100, month=1, day=1)
 
             # Only take the date range that works for all subsets
-            subsets = identifiers[identifier]
-
-            # Ensure that this dataset and ALL of its subsets (if they exist) are operational before testing
-            if identifier not in all_identifiers or not len(subsets) == len(all_identifiers[identifier]):
-                continue
-
             for subset in subsets:
                 dataset = identifier + "_" + subset if subset else identifier
                 min_date = max(min_date, datasets[dataset]['min_date'])
                 max_date = min(max_date, datasets[dataset]['max_date'])
             
+            # Find bad dates from retrieve testing
+            if subsets[-1]:
+                bad_dates = set()
+                for subset in subsets:
+                    bad_dates.update(status_log[identifier][subset]["bad dates"])
+            else:
+                bad_dates = set(status_log[identifier]["bad dates"])
+            
+            # Avoid setting start to a faulty date
+            start_date = min_date
+            while True:
+                if start_date.strftime("%Y-%m-%d") in bad_dates:
+                    start_date += timedelta(7)
+                else:
+                    break
+            
+            # Avoid setting end to a faulty date
+            end_date = max_date
+            while True:
+                if end_date.strftime("%Y-%m-%d") in bad_dates:
+                    end_date -= timedelta(7)
+                else:
+                    break
+            
             # Variables
-            interval = (max_date - min_date).days - 1
-            start_date = min_date.strftime("%Y-%m-%d")
-            end_date = min_date + timedelta(days=interval)
+            interval = (end_date - start_date).days
+            start_date = start_date.strftime("%Y-%m-%d")
             end_date = end_date.strftime("%Y-%m-%d")
 
             # Extract
@@ -396,7 +429,7 @@ class TestLISIRDQuerying(unittest.TestCase):
                     file = local_dir / query_date / file
                     df = pd.read_pickle(file)
 
-                    # For available dataframes, ensure data is as expected
+                    # Ensure data is as expected
                     self.assertIsNotNone(df) # Dataframe exists
                     self.assertGreater(len(df.values), 0) # Contains actual data
 
@@ -417,12 +450,15 @@ class TestLISIRDQuerying(unittest.TestCase):
         """
         Tests extract for datasets with multiple subsets, ensuring only the specified subset is extracted and files are correct.
         """
+        
+        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
+        # If a previous test directory exists, remove it and its associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(TestLISIRDQuerying.TEST_DIR))
 
         required_cols = ["wavelength (nm)", "irradiance (W/m^2/nm)"]
 
         identifiers = self._get_working_identifiers()
-
-        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
 
         for identifier in identifiers:
 
@@ -505,9 +541,13 @@ class TestLISIRDQuerying(unittest.TestCase):
         """
         Tests that extract raises TypeError for illegal dataset types and ValueError for invalid dataset names.
         """
+        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
+        # If a previous test directory exists, remove it and its associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(TestLISIRDQuerying.TEST_DIR))
+
         illegal_types = [None, 5, 100.7, False]
         illegal_dataset = 'test'
-        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
 
         for illegal_type in illegal_types:
             with self.assertRaises(TypeError):
@@ -586,12 +626,15 @@ class TestLISIRDQuerying(unittest.TestCase):
         """
         Tests that extract raises errors for out-of-range or invalid start/end date arguments and types.
         """
+        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
+        # If a previous test directory exists, remove it and its associated files
+        if test_dir.exists() and test_dir.is_dir():
+            shutil.rmtree(Path(TestLISIRDQuerying.TEST_DIR))
+
         illegal_types = [None, 5, 100.7, False]
         
         identifiers = self._get_working_identifiers()
 
-        test_dir = Path(TestLISIRDQuerying.TEST_DIR)
-        
         for identifier in identifiers:
 
             if identifier in TestLISIRDQuerying.irradiance_identifiers:

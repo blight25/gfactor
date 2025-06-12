@@ -1,0 +1,2 @@
+Considering ways of filtering out bad dates from the test query in the gfactorsolar load functions (and possibly other query functions as well)
+Also need extra ways of validating the spectral overlap function
