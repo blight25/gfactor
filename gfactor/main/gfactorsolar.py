@@ -80,7 +80,6 @@ class SolarSpectrum(Spectrum1D):
         self.resample = self._resample
         self.convolution = self._convolution
 
-
     @property
     def name(self):
         return self._name
@@ -142,6 +141,14 @@ class SolarSpectrum(Spectrum1D):
                 integrated_flux, res = self.integrated_flux(bounds, return_res=True)
                 self._emissions[emission]["Integrated Flux"] = integrated_flux
                 self._emissions[emission]["Resolution"] = res
+    
+
+    def mask_by_axis(self, mask):
+        return self.__class__(flux=self.flux[mask], spectral_axis=self.spectral_axis[mask])
+    
+
+    def mask_by_flux(self, mask):
+        return self.__class__(flux=self.flux[mask], spectral_axis=self.spectral_axis[mask])
     
 
     def add_emissions(self, new_emissions:Dict[str, List[float]]):
@@ -514,6 +521,17 @@ class SolarSpectrum(Spectrum1D):
             raise ValueError(f"Left spectra's wavelength units of '{spec_left.spectral_axis.unit}' "
                              f" are incompatible with right spectra's "
                              f" wavelength units '{spec_right.spectral_axis.unit}'")
+
+        # Ensure that left_spec actually runs left of right_spec, and vice versa
+        runs_left = spec_left.spectral_axis[0] <= spec_right.spectral_axis[0]
+        if not runs_left:
+            raise ValueError(f"'spec_right' has lower bound of {spec_right.spectral_axis[0]}, which is"
+                             f"\nsmaller than the 'spec_left' lower bound of {spec_left.spectral_axis[0]}.")
+        
+        runs_right = spec_right.spectral_axis[-1] >= spec_left.spectral_axis[-1]
+        if not runs_right:
+            raise ValueError(f"'spec_left' has an upper bound of {spec_left.spectral_axis[-1]}, which is"
+                             f"\ngreater than the 'spec_right' upper bound of {spec_right.spectral_axis[-1]}.")
 
         # Check hyperparameter values
         if not 0 <= coverage <= 1:
@@ -1057,4 +1075,7 @@ if __name__ == "__main__":
     dir = (package_root / "data" / "spectra").as_posix()
 
     sumer = SolarSpectrum.sumer_spectrum(emissions={"Lyman-alpha":[1214, 1218]})
-    nnl_low = SolarSpectrum.daily_spectrum(date="2023-04-03", dataset="NNL", daily_dir=None)
+    nnl_low, nnl_high = SolarSpectrum.daily_spectrum(date="2023-04-03", dataset="NNL", daily_dir=None)
+    i_flux, res = nnl_high.integrated_flux(bounds=(2970, 2980), return_res=True)
+    print(res)
+

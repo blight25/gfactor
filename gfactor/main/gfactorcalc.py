@@ -253,8 +253,10 @@ class gfactor:
                                 & (nist_table['obs_wl(A)'] <= wavelength_bounds[1]*u.AA)]
 
 
-        # 2. Fetch daily spectrum data
+        # 2. Fetch daily spectrum data and cut off lower portion of low-res spectra (high-res takes priority for smaller wavelengths)
         low_res_daily, high_res_daily = SolarSpectrum.daily_spectrum(date=date, dataset="NNL")
+        lower_bound_mask = low_res_daily.spectral_axis > high_res_daily.spectral_axis[0]
+        low_res_daily = low_res_daily.mask_by_axis(lower_bound_mask)
 
         # 4. Load SUMER data
         sumer = SolarSpectrum.sumer_spectrum()
@@ -274,10 +276,13 @@ class gfactor:
         
 
         # 3. Stitch together into a single spectrum
-        sumer_sumer_scaled = SolarSpectrum.stitch(spec_left=sumer, spec_right=sumer_scaled,
+        spec_1 = SolarSpectrum.stitch(spec_left=sumer, spec_right=sumer_scaled,
                                                   priority="right", coverage=.01, max_res_percentile=0)
         
-        spectrum = SolarSpectrum.stitch(spec_left=sumer_sumer_scaled, spec_right=low_res_daily,
+        spec_2 = SolarSpectrum.stitch(spec_left=spec_1, spec_right=high_res_daily,
+                                      priority="left", coverage=.01, max_res_percentile=0)
+        
+        spectrum = SolarSpectrum.stitch(spec_left=spec_2, spec_right=low_res_daily,
                                         priority="left", coverage=.01, max_res_percentile=0)
         
         
@@ -304,6 +309,6 @@ class gfactor:
 if __name__ == "__main__":
     
     x = gfactor()
-    gf_dataframe = x.gfactors(elements=['O'], date="2009-04-16", wavelength_bounds=(800, 1600), 
+    gf_dataframe = x.gfactors(elements=['O'], date="2009-04-16", wavelength_bounds=(800, 4500), 
                               T=300, hel_d=.352, hel_v=0, debug_bounds=[1301, 1307]) 
-    print("test")
+    print(gf_dataframe)
