@@ -6,9 +6,15 @@ While there are many published articles that contain tabulated fluorescence effi
 
 Our atomic fluorescence calculator, _gfactor_, makes use of publicly available APIs provided by NASA, NOAA, and NIST to calculate the photon emission efficiency in a solar radiation field, colloquially known as a _g_-factor, given a particular heliocentric distance and velocity by the user. This Python package was designed for use in cometary science, where the wide range of applicable heliocentric distances and velocities can drastically affect the fluorescence efficiency via the Swings effect (Swings 1941). However, there are many astrophysical applications where accurate determination of the fluorescence efficiency is required (Mercury and Moon exospheres, thin atmospheres on the Galilean satellites, etc.) and we hope that our Python packages empowers more early career researchers to probe the variability in these rates, even when the literature has historically kept them static. 
 
-*describe the scaling methodology*
+## Solar Spectral Scaling Methodology
 
-*describe the astropy units*
+In addition to combining the API calls to NIST and LiSIRD to simplify calculation of the fluorescence efficiencies, a major goal of this software package was to model a high resolution solar spectral irradiance based on the best available daily cadence observations. The NOAA/NASA/LASP solar model, or NNL, combines daily observations of the solar irradiance with a moderate resolution solar spectrum to produce a solar spectral irradiance for any day since January 1, 1978 (__citation__). However, the NNL model does not have high enough resolution to resolve the narrow atomic emission features in the FUV; as a result, when calculating _g_-factors the values can be substantially over estimated at high heliocentric velocities. To correct this, _gfactor_ uses the highest resolution solar spectral atlas observation from the SUMER instrument (__citation__) to properly capture the line shapes of the emission features while conserving the total flux of the solar spectrum reported by NNL. 
+
+## Dimensional Analysis with Astropy Units
+
+In order to verify the accuracy of the code's results we have integrated the __astropy.units__ module throughout. By doing so we have verified that conversions between units are transparent and tracked, allowing a curious user to pop open the hood of the code and check the format. 
+
+## Organization
 
 _gfactor_ is broken into three main classes, the _gfactorcalc_, _gfactoratomic_, and _gfactorsolar_, which are designed to perform the calculations, retrieve the queried atomic constants from the NIST Atomic Spectra Database (<https://www.nist.gov/pml/atomic-spectra-database>), and retrieve, trim, and scale the solar spectral irradiance data from LiSIRD (<https://lasp.colorado.edu/lisird/>). Benchmark tests have been carried out against the $g$-factors published in Killen et al. 2022, which were done for Mercury's exospheric species and orbital properties. This publication has the most transparent methodology and solar spectral dataset in the literature, allowing us to test our spectral scaling methodology; most comet literature does not report the scaling method used to adjust a solar spectral atlas dataset to a given day, making it necessary for us to use Killen et al. 2022's approach of implementing the solar spectrum for a specific day from the LiSIRD database.  
 
