@@ -12,7 +12,7 @@ In addition to combining the API calls to NIST and LiSIRD to simplify calculatio
 
 ## Dimensional Analysis with Astropy Units
 
-In order to verify the accuracy of the code's results we have integrated the __astropy.units__ module throughout. By doing so we have verified that conversions between units are transparent and tracked, allowing a curious user to pop open the hood of the code and check the format. 
+In order to verify the accuracy of the code's results we have integrated the __astropy.units__ module throughout. By doing so we have verified that conversions between units are transparent and tracked, allowing a curious user to pop open the hood of the code and check the format. Given the wide variety in physical units that are ingested from the API's (eV, ergs/cm^2/s/Angstrom, etc.) the astropy.units functionality is essential to perform accurate conversions without overpopulating the code with additional conversion factors. 
 
 ## Organization
 
