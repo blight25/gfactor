@@ -243,8 +243,8 @@ class SolarSpectrum(Spectrum1D):
         available datasets are as follows (see descriptions from UC Boulder's 
         LISIRD: https://lasp.colorado.edu/lisird/):
 
-        1. {NNL: {high-res: 'https://lasp.colorado.edu/lisird/data/nnl_ssi_P1D'}
-                 {low-res: 'https://lasp.colorado.edu/lisird/data/nnl_hires_ssi_P1D'} }
+        1. {NNL: {high-res: 'https://lasp.colorado.edu/lisird/data/nnl_hires_ssi_P1D'}
+                 {low-res: 'https://lasp.colorado.edu/lisird/data/nnl_ssi_P1D'} }
 
         2. {SORCE: {high-res: 'https://lasp.colorado.edu/lisird/data/sorce_solstice_ssi_high_res'}
                    {low-res: 'https://lasp.colorado.edu/lisird/data/sorce_ssi_l3'} }       
