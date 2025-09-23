@@ -12,13 +12,15 @@ You can install `gfactor` directly from GitHub:
 
 ```bash
 pip install git+https://github.com/username/gfactor.git
+```
 Alternatively, if you want to work with the latest development version:
 
-bash
 Copy code
+```bash
 git clone https://github.com/blight25/gfactor.git
 cd gfactor
 pip install -e .
+```
 
 Requirements
 -Python 3.12+
