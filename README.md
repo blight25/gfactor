@@ -2,7 +2,7 @@
 
 # gfactor
 
-`gfactor` is a Python package for computing atomic fluorescence efficiencies in a solar radiation field for astrophysical calculations. To produce the most accurate values the code uses API calls to both the National Institute of Standards and Technology's Atomic Spectral Database and the Laboratory for Atmospheric and Space Physics LiSIRD solar spectral database to obtain the atomic constants and solar irradiance data needed to calculate the fluorescence efficiency. This allows the user to specify specific dates of interest to obtain fluorescence efficiencies; early tests have shown that over the course of full solar cycles the fluorescence efficiencies can vary by up to 30%. 
+`gfactor` is a Python package for computing atomic fluorescence efficiencies in a solar radiation field for astrophysical calculations. To produce the most accurate values the code uses API calls to both the National Institute of Standards and Technology's [Atomic Spectral Database](https://www.nist.gov/pml/atomic-spectra-database) and the Laboratory for Atmospheric and Space Physics [LiSIRD](https://lasp.colorado.edu/lisird) solar spectral database to obtain the atomic constants and solar irradiance data needed to calculate the fluorescence efficiency. This allows the user to specify specific dates of interest to obtain fluorescence efficiencies; early tests have shown that over the course of full solar cycles the fluorescence efficiencies can vary by up to 30%. 
 
 ---
 
