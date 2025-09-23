@@ -24,14 +24,23 @@ pip install -e .
 
 Requirements
 -Python 3.12+
+
 -requests
+
 -tqdm 
+
 -pandas
+
 -matplotlib
+
 -scipy
+
 -specutils
+
 -astropy 
+
 -lmfit
+
 -pytest
 
 
@@ -45,9 +54,8 @@ Copy code
 import gfactor
 
 # Example function call
-result = gfactor.compute("H2O", wavelength=550)
-print(result)
-For more examples, see the documentation or the examples/ directory.
+To be completed 
+
 
 Contributing
 Contributions are welcome! Please open an issue or submit a pull request on GitHub.
